@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { apiGet, apiPut } from '../api';
+import { apiGet } from '../api';
 import { useAuth } from '../auth';
 import Layout from '../components/Layout';
 import Chatbot from '../components/Chatbot';
@@ -8,12 +8,26 @@ import Chatbot from '../components/Chatbot';
 interface Chapter { id: number; title: string; summary: string; difficulty: string; est_minutes: number; status?: string; best_score?: number; }
 interface Module { id: number; title: string; icon: string; color: string; description: string; chapters: Chapter[]; }
 
+const ACCENTS = ['#1E88E5', '#7c3aed', '#0ea5e9', '#16a34a', '#e11d48', '#f59e0b'];
+function applyTheme(t: string) {
+  document.documentElement.setAttribute('data-theme', t === 'dark' ? 'dark' : 'light');
+  localStorage.setItem('ns-theme', t);
+}
+function applyAccent(c: string) {
+  document.documentElement.style.setProperty('--primary', c);
+  document.documentElement.style.setProperty('--primary-2', c);
+  localStorage.setItem('ns-accent', c);
+}
+
 export default function StudentDashboard() {
   const [tab, setTab] = useState('overview');
   const [dash, setDash] = useState<any>(null);
   const [modules, setModules] = useState<Module[]>([]);
 
   useEffect(() => {
+    applyTheme(localStorage.getItem('ns-theme') || 'light');
+    const a = localStorage.getItem('ns-accent');
+    if (a) applyAccent(a);
     apiGet('/student/dashboard').then(setDash).catch(() => {});
     apiGet<{ modules: Module[] }>('/student/courses').then((r) => setModules(r.modules)).catch(() => {});
   }, []);
@@ -25,6 +39,10 @@ export default function StudentDashboard() {
         subtitle="Learn, build and innovate — your maker journey starts here"
         active={tab}
         onTab={setTab}
+        menu={[
+          { key: 'profile', label: 'My Profile', icon: '👤', onClick: () => setTab('profile') },
+          { key: 'settings', label: 'Settings', icon: '⚙️', onClick: () => setTab('settings') },
+        ]}
         tabs={[
           { key: 'overview', label: 'Dashboard', icon: '🏠', group: 'Overview' },
           { key: 'learn', label: 'My Courses', icon: '📚', group: 'My Learning' },
@@ -33,7 +51,6 @@ export default function StudentDashboard() {
           { key: 'leaderboard', label: 'Leaderboard', icon: '🏆', group: 'Community' },
           { key: 'mentor', label: 'AI Mentor', icon: '🤖', group: 'AI & Mentors' },
           { key: 'report', label: 'Progress Report', icon: '📊', group: 'My Progress' },
-          { key: 'profile', label: 'My Profile', icon: '👤', group: 'Settings' },
         ]}
       >
         {tab === 'overview' && <Overview dash={dash} modules={modules} setTab={setTab} />}
@@ -44,6 +61,7 @@ export default function StudentDashboard() {
         {tab === 'mentor' && <AIMentor />}
         {tab === 'report' && <ProgressReport />}
         {tab === 'profile' && <MyProfile />}
+        {tab === 'settings' && <Settings />}
       </Layout>
       <Chatbot />
     </>
@@ -109,6 +127,22 @@ function Overview({ dash, modules, setTab }: { dash: any; modules: Module[]; set
         <Kpi icon="✅" n={t.completed} l="Completed" c="var(--green)" />
         <Kpi icon="🧠" n={t.quizzes_taken} l="Quizzes Taken" c="var(--purple)" />
         <Kpi icon="⭐" n={t.xp} l="XP Earned" c="var(--yellow)" />
+      </div>
+
+      {/* analytics / visuals */}
+      <div className="analytics-row">
+        <div className="card pad">
+          <div className="panel-head"><div><h3>📈 Weekly Activity</h3><div className="muted" style={{ fontSize: 13 }}>XP earned over the last 7 days</div></div></div>
+          <BarChart data={WEEKLY} />
+        </div>
+        <div className="card pad analytics-donut">
+          <div className="panel-head"><div><h3>🧩 Overall Completion</h3><div className="muted" style={{ fontSize: 13 }}>{t.completed} of {t.total_chapters} chapters</div></div></div>
+          <Donut value={overall} label="complete" />
+        </div>
+        <div className="card pad">
+          <div className="panel-head"><div><h3>🎯 Skill Focus</h3><div className="muted" style={{ fontSize: 13 }}>Where your effort goes</div></div></div>
+          <SkillBars data={SKILLS} />
+        </div>
       </div>
 
       <div className="dash-cols">
@@ -244,12 +278,12 @@ function Ring({ value, label }: { value: number; label: string }) {
   return (
     <div className="ring">
       <svg viewBox="0 0 130 130" width="130" height="130">
-        <circle cx="65" cy="65" r={r} fill="none" stroke="var(--border)" strokeWidth="12" />
+        <circle cx="65" cy="65" r={r} fill="none" stroke="rgba(255,255,255,0.25)" strokeWidth="12" />
         <circle cx="65" cy="65" r={r} fill="none" stroke="url(#rg)" strokeWidth="12" strokeLinecap="round"
           strokeDasharray={c} strokeDashoffset={off} transform="rotate(-90 65 65)" />
-        <defs><linearGradient id="rg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stopColor="#4cc9f0" /><stop offset="1" stopColor="#f72585" /></linearGradient></defs>
-        <text x="65" y="62" textAnchor="middle" fontSize="26" fontWeight="800" fill="#e8edf7">{value}%</text>
-        <text x="65" y="82" textAnchor="middle" fontSize="10" fill="#93a0c0">complete</text>
+        <defs><linearGradient id="rg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stopColor="#ffffff" /><stop offset="1" stopColor="#bbdefb" /></linearGradient></defs>
+        <text x="65" y="62" textAnchor="middle" fontSize="26" fontWeight="800" fill="#ffffff">{value}%</text>
+        <text x="65" y="82" textAnchor="middle" fontSize="10" fill="#dbeafe">complete</text>
       </svg>
       <div className="muted" style={{ fontSize: 12, textAlign: 'center' }}>{label}</div>
     </div>
@@ -257,6 +291,60 @@ function Ring({ value, label }: { value: number; label: string }) {
 }
 function Kpi({ icon, n, l, c }: any) {
   return <div className="card kpi"><span className="kpi-ico" style={{ color: c }}>{icon}</span><div><div className="kpi-n">{n}</div><div className="muted" style={{ fontSize: 13 }}>{l}</div></div></div>;
+}
+
+/* ---------------- charts / visuals ---------------- */
+const WEEKLY = [
+  { d: 'Mon', v: 40 }, { d: 'Tue', v: 65 }, { d: 'Wed', v: 30 }, { d: 'Thu', v: 82 },
+  { d: 'Fri', v: 55 }, { d: 'Sat', v: 95 }, { d: 'Sun', v: 48 },
+];
+const SKILLS = [
+  { t: 'Electronics', v: 72, c: 'var(--primary)' },
+  { t: 'Robotics', v: 58, c: 'var(--purple)' },
+  { t: 'Coding', v: 64, c: 'var(--green)' },
+  { t: '3D Design', v: 40, c: 'var(--yellow)' },
+  { t: 'AI / ML', v: 33, c: 'var(--pink)' },
+];
+function BarChart({ data }: { data: { d: string; v: number }[] }) {
+  const max = Math.max(...data.map((x) => x.v), 1);
+  return (
+    <div className="barchart">
+      {data.map((x) => (
+        <div key={x.d} className="barchart-col" title={`${x.v} XP`}>
+          <div className="barchart-track"><span style={{ height: `${(x.v / max) * 100}%` }} /></div>
+          <small>{x.d}</small>
+        </div>
+      ))}
+    </div>
+  );
+}
+function Donut({ value, label }: { value: number; label: string }) {
+  const r = 46, c = 2 * Math.PI * r, off = c - (value / 100) * c;
+  return (
+    <div className="donut">
+      <svg viewBox="0 0 120 120" width="150" height="150">
+        <circle cx="60" cy="60" r={r} fill="none" stroke="var(--bg-2)" strokeWidth="14" />
+        <circle cx="60" cy="60" r={r} fill="none" stroke="url(#dg)" strokeWidth="14" strokeLinecap="round"
+          strokeDasharray={c} strokeDashoffset={off} transform="rotate(-90 60 60)" />
+        <defs><linearGradient id="dg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stopColor="#1E88E5" /><stop offset="1" stopColor="#8b5cf6" /></linearGradient></defs>
+        <text x="60" y="58" textAnchor="middle" fontSize="24" fontWeight="800" fill="var(--text)">{value}%</text>
+        <text x="60" y="77" textAnchor="middle" fontSize="10" fill="var(--muted)">{label}</text>
+      </svg>
+    </div>
+  );
+}
+function SkillBars({ data }: { data: { t: string; v: number; c: string }[] }) {
+  return (
+    <div className="skill-bars">
+      {data.map((s) => (
+        <div key={s.t} className="skill-row">
+          <span className="skill-name">{s.t}</span>
+          <div className="skill-track"><span style={{ width: `${s.v}%`, background: s.c }} /></div>
+          <span className="skill-val">{s.v}%</span>
+        </div>
+      ))}
+    </div>
+  );
 }
 
 /* ---------------- curated content ---------------- */
@@ -303,42 +391,74 @@ function Learn({ modules }: { modules: Module[] }) {
   const [open, setOpen] = useState<number | null>(modules[0]?.id ?? null);
   useEffect(() => { if (open == null && modules[0]) setOpen(modules[0].id); }, [modules]);
   if (!modules.length) return <div className="spinner" />;
+
+  const allCh = modules.flatMap((m) => m.chapters);
+  const doneCh = allCh.filter((c) => c.status === 'completed').length;
+  const overall = allCh.length ? Math.round((doneCh / allCh.length) * 100) : 0;
+
   return (
-    <div className="grid">
-      {modules.map((m) => {
-        const done = m.chapters.filter((c) => c.status === 'completed').length;
-        const isOpen = open === m.id;
-        return (
-          <div key={m.id} className={`card course-card ${isOpen ? 'open' : ''}`}>
-            <div className="course-head" onClick={() => setOpen(isOpen ? null : m.id)}>
-              <span className="course-ico" style={{ background: m.color || 'var(--primary-soft)' }}>{m.icon}</span>
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <h3 style={{ margin: 0, fontSize: 17 }}>{m.title}</h3>
-                <div className="muted" style={{ fontSize: 13, marginTop: 2 }}>{m.description}</div>
-              </div>
-              <span className="tag">{done}/{m.chapters.length} done</span>
-              <span className="course-chev">{isOpen ? '▾' : '▸'}</span>
-            </div>
-            {isOpen && (
-              <div className="course-body">
-                {m.chapters.map((c, i) => (
-                  <div key={c.id} className="chapter-row pro" onClick={() => nav(`/student/chapter/${c.id}`)}>
-                    <span className="chapter-num">{String(i + 1).padStart(2, '0')}</span>
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <b>{c.status === 'completed' && <span className="check">✔ </span>}{c.title}</b>
-                      <div className="muted" style={{ fontSize: 13 }}>{c.summary}</div>
-                    </div>
-                    <div className="row" style={{ gap: 10 }}>
-                      <span className={`tag ${c.difficulty}`}>{c.difficulty}</span>
-                      <span className="muted" style={{ fontSize: 12, minWidth: 36, textAlign: 'right' }}>{c.est_minutes}m</span>
-                    </div>
+    <div className="grid learn-wrap">
+      {/* summary header */}
+      <div className="learn-hero">
+        <div className="learn-hero-text">
+          <span className="kicker" style={{ color: '#bcd6ff' }}>My Courses</span>
+          <h2 style={{ margin: '6px 0 4px', color: '#fff' }}>Your learning library</h2>
+          <p style={{ margin: 0, color: 'rgba(255,255,255,0.85)', fontSize: 14 }}>
+            {modules.length} modules · {allCh.length} chapters · {doneCh} completed
+          </p>
+        </div>
+        <div className="learn-hero-stats">
+          <div><b>{overall}%</b><span>Overall</span></div>
+          <div><b>{doneCh}</b><span>Done</span></div>
+          <div><b>{allCh.length - doneCh}</b><span>To go</span></div>
+        </div>
+      </div>
+
+      {/* module cards */}
+      <div className="learn-grid">
+        {modules.map((m) => {
+          const done = m.chapters.filter((c) => c.status === 'completed').length;
+          const mp = m.chapters.length ? Math.round((done / m.chapters.length) * 100) : 0;
+          const isOpen = open === m.id;
+          return (
+            <div key={m.id} className={`course-card2 ${isOpen ? 'open' : ''}`}>
+              <div className="course2-head" onClick={() => setOpen(isOpen ? null : m.id)}>
+                <span className="course2-ico" style={{ background: m.color || 'var(--primary)' }}>{m.icon}</span>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div className="row between" style={{ gap: 8 }}>
+                    <h3 style={{ margin: 0, fontSize: 16 }}>{m.title}</h3>
+                    <span className="course2-chev">{isOpen ? '▾' : '▸'}</span>
                   </div>
-                ))}
+                  <div className="muted" style={{ fontSize: 12.5, marginTop: 2 }}>{m.description}</div>
+                  <div className="course2-meta">
+                    <div className="course2-bar"><span style={{ width: `${mp}%` }} /></div>
+                    <span className="course2-pct">{mp}%</span>
+                    <span className="tag" style={{ flexShrink: 0 }}>{done}/{m.chapters.length}</span>
+                  </div>
+                </div>
               </div>
-            )}
-          </div>
-        );
-      })}
+              {isOpen && (
+                <div className="course2-body">
+                  {m.chapters.map((c, i) => (
+                    <div key={c.id} className="ch-card" onClick={() => nav(`/student/chapter/${c.id}`)}>
+                      <span className={`ch-status ${c.status === 'completed' ? 'done' : ''}`}>{c.status === 'completed' ? '✓' : String(i + 1).padStart(2, '0')}</span>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <b style={{ fontSize: 14 }}>{c.title}</b>
+                        <div className="muted" style={{ fontSize: 12.5, marginTop: 2 }}>{c.summary}</div>
+                        <div className="ch-tags">
+                          <span className={`tag ${c.difficulty}`}>{c.difficulty}</span>
+                          <span className="ch-time">⏱ {c.est_minutes}m</span>
+                        </div>
+                      </div>
+                      <span className="ch-go">→</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }
@@ -488,120 +608,123 @@ function ProgressReport() {
   );
 }
 
-function MyProfile() {
-  const { user } = useAuth();
-  const [profile, setProfile] = useState<any>(null);
-  const [activeTab, setActiveTab] = useState('personal');
-  const [form, setForm] = useState<any>({});
-  const [saved, setSaved] = useState(false);
-  const [err, setErr] = useState('');
+function fmtDate(v: any) { return v ? new Date(v).toLocaleDateString() : '—'; }
 
-  useEffect(() => {
-    apiGet<any>('/student/profile').then(r => { setProfile(r.profile); setForm(r.profile || {}); }).catch(() => {});
-  }, []);
-
-  function f(k: string) { return form[k] ?? ''; }
-  function set(k: string, v: any) { setForm((p: any) => ({ ...p, [k]: v })); }
-
-  async function save() {
-    setErr(''); setSaved(false);
-    try {
-      await apiPut('/student/profile', form);
-      setSaved(true); setTimeout(() => setSaved(false), 3000);
-    } catch (e: any) { setErr(e.message); }
-  }
-
-  if (!profile) return <div className="spinner" />;
-
+function InfoCard({ title, icon, rows }: { title: string; icon: string; rows: [string, any][] }) {
   return (
-    <div className="grid">
-      <div className="card pad" style={{ display: 'flex', gap: 20, alignItems: 'center', background: 'linear-gradient(120deg,var(--primary-soft),#fff)' }}>
-        <div style={{ width: 72, height: 72, borderRadius: '50%', background: 'var(--primary)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 30, color: '#fff', flexShrink: 0 }}>
-          {(user?.full_name || 'S')[0].toUpperCase()}
-        </div>
-        <div>
-          <h2 style={{ margin: 0 }}>{profile.full_name}</h2>
-          <p className="muted" style={{ margin: '4px 0 0' }}>{profile.email} · {profile.grade_name || 'No class assigned'}</p>
-        </div>
-      </div>
-
-      <div className="row" style={{ gap: 6, flexWrap: 'wrap' }}>
-        {['personal','parent','school','account'].map(t => (
-          <button key={t} className={`btn sm ${activeTab === t ? '' : 'ghost'}`} onClick={() => setActiveTab(t)} style={{ textTransform: 'capitalize' }}>{t}</button>
+    <div className="card pad">
+      <h3 style={{ margin: '0 0 14px', fontSize: 16 }}>{icon} {title}</h3>
+      <div className="info-grid">
+        {rows.map(([l, v]) => (
+          <div key={l} className="info-cell">
+            <span className="info-label">{l}</span>
+            <span className="info-value">{v === null || v === undefined || v === '' ? '—' : v}</span>
+          </div>
         ))}
       </div>
-
-      {err && <div className="err">{err}</div>}
-      {saved && <div className="card pad" style={{ borderColor: 'var(--green)', fontSize: 13 }}>✓ Profile saved successfully!</div>}
-
-      {activeTab === 'personal' && (
-        <div className="card pad grid" style={{ gap: 12 }}>
-          <h3 style={{ margin: 0 }}>Personal Information</h3>
-          <div className="field"><label>Full Name</label><input value={f('full_name')} onChange={e => set('full_name', e.target.value)} /></div>
-          <div className="field"><label>Phone</label><input value={f('phone')} onChange={e => set('phone', e.target.value)} /></div>
-          <div className="field"><label>Date of Birth</label><input type="date" value={f('date_of_birth') ? f('date_of_birth').split('T')[0] : ''} onChange={e => set('date_of_birth', e.target.value)} /></div>
-          <div className="field"><label>Gender</label>
-            <select value={f('gender')} onChange={e => set('gender', e.target.value)}>
-              <option value="">— select —</option><option>Male</option><option>Female</option><option>Other</option>
-            </select>
-          </div>
-          <div className="field"><label>Blood Group</label>
-            <select value={f('blood_group')} onChange={e => set('blood_group', e.target.value)}>
-              <option value="">— select —</option>{['A+','A-','B+','B-','AB+','AB-','O+','O-'].map(b => <option key={b}>{b}</option>)}
-            </select>
-          </div>
-          <div className="field"><label>Bio</label><textarea rows={3} value={f('bio')} onChange={e => set('bio', e.target.value)} placeholder="A little about yourself..." /></div>
-          <div className="field"><label>Hobbies</label><input value={f('hobbies')} onChange={e => set('hobbies', e.target.value)} placeholder="e.g. Robotics, Drawing, Cricket" /></div>
-          <div className="field"><label>Languages</label><input value={f('languages')} onChange={e => set('languages', e.target.value)} placeholder="e.g. English, Hindi" /></div>
-          <div className="field"><label>Address</label><input value={f('address_line1')} onChange={e => set('address_line1', e.target.value)} /></div>
-          <div className="field"><label>City</label><input value={f('city')} onChange={e => set('city', e.target.value)} /></div>
-          <div className="field"><label>State</label><input value={f('state')} onChange={e => set('state', e.target.value)} /></div>
-          <div className="field"><label>PIN Code</label><input value={f('pincode')} onChange={e => set('pincode', e.target.value)} /></div>
-        </div>
-      )}
-
-      {activeTab === 'parent' && (
-        <div className="card pad grid" style={{ gap: 12 }}>
-          <h3 style={{ margin: 0 }}>Parent / Guardian Details</h3>
-          <div className="field"><label>Parent / Guardian Name</label><input value={f('parent_name')} onChange={e => set('parent_name', e.target.value)} /></div>
-          <div className="field"><label>Relation</label>
-            <select value={f('parent_relation')} onChange={e => set('parent_relation', e.target.value)}>
-              <option>Parent</option><option>Father</option><option>Mother</option><option>Guardian</option>
-            </select>
-          </div>
-          <div className="field"><label>Parent Phone</label><input value={f('parent_phone')} onChange={e => set('parent_phone', e.target.value)} /></div>
-          <div className="field"><label>Parent Email</label><input type="email" value={f('parent_email')} onChange={e => set('parent_email', e.target.value)} /></div>
-          <div className="field"><label>Occupation</label><input value={f('parent_occupation')} onChange={e => set('parent_occupation', e.target.value)} /></div>
-          <div className="field"><label>Emergency Contact</label><input value={f('emergency_contact')} onChange={e => set('emergency_contact', e.target.value)} /></div>
-          <div className="field"><label>Emergency Phone</label><input value={f('emergency_phone')} onChange={e => set('emergency_phone', e.target.value)} /></div>
-        </div>
-      )}
-
-      {activeTab === 'school' && (
-        <div className="card pad grid" style={{ gap: 12 }}>
-          <h3 style={{ margin: 0 }}>School Information</h3>
-          <div className="field"><label>School Name</label><input value={f('school_name')} onChange={e => set('school_name', e.target.value)} /></div>
-          <div className="field"><label>School City</label><input value={f('school_city')} onChange={e => set('school_city', e.target.value)} /></div>
-          <div className="field"><label>Roll Number</label><input value={f('roll_number')} onChange={e => set('roll_number', e.target.value)} /></div>
-          <div className="field"><label>Admission Year</label><input type="number" value={f('admission_year')} onChange={e => set('admission_year', e.target.value ? Number(e.target.value) : null)} /></div>
-        </div>
-      )}
-
-      {activeTab === 'account' && (
-        <div className="card pad grid" style={{ gap: 12 }}>
-          <h3 style={{ margin: 0 }}>Account Information</h3>
-          <p className="muted" style={{ fontSize: 13 }}>To change your password, contact your teacher or admin.</p>
-          <table>
-            <tbody>
-              {[['Email', profile.email],['Username', profile.username || '—'],['Class', profile.grade_name || '—'],['Member since', new Date(profile.created_at).toLocaleDateString()]].map(([l,v]) => (
-                <tr key={l}><td style={{ color: 'var(--muted)', width: 140 }}>{l}</td><td>{v}</td></tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
-
-      <button className="btn" onClick={save} style={{ alignSelf: 'flex-start' }}>Save Profile</button>
     </div>
   );
 }
+
+function MyProfile() {
+  const { user } = useAuth();
+  const [profile, setProfile] = useState<any>(null);
+
+  useEffect(() => {
+    apiGet<any>('/student/profile').then(r => setProfile(r.profile)).catch(() => {});
+  }, []);
+
+  if (!profile) return <div className="spinner" />;
+  const p = profile;
+
+  return (
+    <div className="grid">
+      <div className="profile-banner">
+        <div className="profile-avatar">{(user?.full_name || 'S')[0].toUpperCase()}</div>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <h2 style={{ margin: 0, color: '#fff' }}>{p.full_name}</h2>
+          <p style={{ margin: '4px 0 0', color: 'rgba(255,255,255,0.85)' }}>{p.email} · {p.grade_name || 'No class assigned'}</p>
+        </div>
+        <span className="profile-readonly">🔒 Read-only</span>
+      </div>
+
+      <p className="muted" style={{ fontSize: 13, margin: 0 }}>
+        This is your student record. To update any details, please contact your teacher or school administrator.
+      </p>
+
+      <InfoCard title="Personal Information" icon="🧑" rows={[
+        ['Full Name', p.full_name], ['Phone', p.phone], ['Date of Birth', fmtDate(p.date_of_birth)],
+        ['Gender', p.gender], ['Blood Group', p.blood_group], ['Languages', p.languages],
+        ['Hobbies', p.hobbies], ['Bio', p.bio],
+      ]} />
+
+      <InfoCard title="Address" icon="📍" rows={[
+        ['Address', p.address_line1], ['City', p.city], ['State', p.state], ['PIN Code', p.pincode],
+      ]} />
+
+      <InfoCard title="Parent / Guardian" icon="👪" rows={[
+        ['Name', p.parent_name], ['Relation', p.parent_relation], ['Phone', p.parent_phone],
+        ['Email', p.parent_email], ['Occupation', p.parent_occupation],
+        ['Emergency Contact', p.emergency_contact], ['Emergency Phone', p.emergency_phone],
+      ]} />
+
+      <InfoCard title="School Information" icon="🏫" rows={[
+        ['School Name', p.school_name], ['School City', p.school_city],
+        ['Roll Number', p.roll_number], ['Admission Year', p.admission_year],
+      ]} />
+
+      <InfoCard title="Account" icon="🪪" rows={[
+        ['Email', p.email], ['Username', p.username], ['Class', p.grade_name],
+        ['Member since', fmtDate(p.created_at)],
+      ]} />
+    </div>
+  );
+}
+
+function Settings() {
+  const [theme, setTheme] = useState(localStorage.getItem('ns-theme') || 'light');
+  const [accent, setAccent] = useState(localStorage.getItem('ns-accent') || '#1E88E5');
+
+  function chooseTheme(t: string) { setTheme(t); applyTheme(t); }
+  function chooseAccent(c: string) { setAccent(c); applyAccent(c); }
+
+  return (
+    <div className="grid">
+      <div className="profile-banner">
+        <div className="profile-avatar">⚙️</div>
+        <div>
+          <h2 style={{ margin: 0, color: '#fff' }}>Settings</h2>
+          <p style={{ margin: '4px 0 0', color: 'rgba(255,255,255,0.85)' }}>Personalise the look and feel of your portal</p>
+        </div>
+      </div>
+
+      <div className="card pad">
+        <h3 style={{ margin: '0 0 6px', fontSize: 16 }}>🎨 Theme</h3>
+        <p className="muted" style={{ fontSize: 13, marginTop: 0 }}>Choose how your dashboard looks.</p>
+        <div className="theme-options">
+          {[
+            { k: 'light', t: 'Light', d: 'Bright & clean', sw: '#f5f7fb' },
+            { k: 'dark', t: 'Dark', d: 'Easy on the eyes', sw: '#0f172a' },
+          ].map((o) => (
+            <button key={o.k} className={`theme-opt ${theme === o.k ? 'on' : ''}`} onClick={() => chooseTheme(o.k)}>
+              <span className="theme-swatch" style={{ background: o.sw }} />
+              <div><b>{o.t}</b><small>{o.d}</small></div>
+              {theme === o.k && <span className="theme-check">✓</span>}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div className="card pad">
+        <h3 style={{ margin: '0 0 6px', fontSize: 16 }}>🌈 Accent Colour</h3>
+        <p className="muted" style={{ fontSize: 13, marginTop: 0 }}>Pick the highlight colour used across your portal.</p>
+        <div className="accent-row">
+          {ACCENTS.map((c) => (
+            <button key={c} className={`accent-dot ${accent.toLowerCase() === c.toLowerCase() ? 'on' : ''}`} style={{ background: c }} onClick={() => chooseAccent(c)} aria-label={c} />
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+

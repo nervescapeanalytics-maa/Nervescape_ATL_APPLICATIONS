@@ -1,5 +1,9 @@
 import { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useAuth, Role } from '../auth';
+import { PROGRAMS, IMG } from '../data/programs';
+import Logo from '../components/Logo';
+import SiteFooter from '../components/SiteFooter';
 
 const ROLES: { key: Role; label: string; emoji: string; blurb: string }[] = [
   { key: 'admin', label: 'Admin Portal', emoji: '🛡️', blurb: 'Schools, users, courses, labs & operations' },
@@ -13,26 +17,32 @@ const DEMO: Record<Role, { id: string; pw: string }> = {
   student: { id: 'student61@lms.local', pw: 'Student@123' },
 };
 
-const IMG = (id: string, w = 1200) => `https://images.unsplash.com/photo-${id}?auto=format&fit=crop&w=${w}&q=85`;
-
-const TOPICS = [
-  { t: 'Robotics & Autonomous Systems', d: 'Design line-followers, robotic arms and intelligent autonomous machines.', img: '1485827404703-89b55fcc595e', tag: 'Robotics' },
-  { t: 'STEM Labs & Innovation', d: 'World-class hands-on labs for inquiry, experimentation and engineering.', img: '1581091226825-a6a2a5aee158', tag: 'STEM' },
-  { t: 'IoT & AIoT Integration', d: 'Connect devices to the cloud, add edge intelligence and build smart systems.', img: '1518770660439-4636190af475', tag: 'IoT' },
-  { t: 'Electronics & Breadboarding', d: 'Build live circuits and master current, voltage and components from scratch.', img: '1597852074816-d933c7d2b988', tag: 'Electronics' },
-  { t: 'Sensors, Arduino & Microcontrollers', d: 'Program the brains of machines to sense and react to the real world.', img: '1553406830-ef2513450d76', tag: 'Embedded' },
-  { t: '3D Modelling & Fabrication', d: 'Turn premium-grade ideas into printable physical objects, layer by layer.', img: '1631467018858-d7a0fa45c842', tag: 'Fabrication' },
-  { t: 'AI / ML Foundations', d: 'Teach machines to learn, classify and see — with industry-grade tooling.', img: '1677442136019-21780ecad995', tag: 'AI' },
-  { t: 'Entrepreneurship & Tinkerpreneur', d: 'Take innovation to market: pitch, prototype and present like a founder.', img: '1556761175-5973dc0f32e7', tag: 'Startup' },
+const WHY = [
+  { t: 'Computational Thinking', d: 'Decompose complex problems, find patterns, abstract elegantly and build robust algorithms in every chapter.', i: '🧠', img: '1518186285589-2f7649de83e0' },
+  { t: 'Logical Reasoning Engine', d: 'Brain teasers and logic puzzles that train sharp, structured, founder-grade thinking.', i: '🔍', img: '1456513080510-7bf3a84b82f8' },
+  { t: 'AI-Powered Mentor', d: 'An always-on, context-aware chatbot delivering doubts, hints and personalised guidance 24×7.', i: '🤖', img: '1677442136019-21780ecad995' },
+  { t: 'Tinkering Challenges', d: 'Hands-on, project-based learning aligned to ATL labs — prototype like a maker, ship like an engineer.', i: '🛠', img: '1581091226825-a6a2a5aee158' },
+  { t: 'Wired Admin → Teacher → Student', d: 'Every role connected with live progress tracking, deep analytics and frictionless workflows.', i: '🔗', img: '1551288049-bebda4e38f71' },
+  { t: 'Gamified Mastery', d: 'XP, leaderboards and innovation scores keep learners hooked and consistently outperforming.', i: '🏆', img: '1552664730-d307ca884978' },
 ];
 
-const WHY = [
-  { t: 'Computational Thinking', d: 'Decompose complex problems, find patterns, abstract elegantly and build robust algorithms in every chapter.', i: '🧠' },
-  { t: 'Logical Reasoning Engine', d: 'Brain teasers and logic puzzles that train sharp, structured, founder-grade thinking.', i: '🔍' },
-  { t: 'AI-Powered Mentor', d: 'An always-on, context-aware chatbot delivering doubts, hints and personalised guidance 24×7.', i: '🤖' },
-  { t: 'Tinkering Challenges', d: 'Hands-on, project-based learning aligned to ATL labs — prototype like a maker, ship like an engineer.', i: '🛠' },
-  { t: 'Wired Admin → Teacher → Student', d: 'Every role connected with live progress tracking, deep analytics and frictionless workflows.', i: '🔗' },
-  { t: 'Gamified Mastery', d: 'XP, leaderboards and innovation scores keep learners hooked and consistently outperforming.', i: '🏆' },
+// Landing stats, journey steps and testimonials
+const STATS = [
+  { n: '700+', l: 'Curriculum chapters' },
+  { n: '8', l: 'Innovation tracks' },
+  { n: '24×7', l: 'AI mentor' },
+  { n: '6–12', l: 'Classes served' },
+];
+const STEPS = [
+  { n: '01', i: '🧭', t: 'Pick your track', d: 'Choose from eight hands-on programs — robotics, IoT, AI/ML, 3D fabrication, entrepreneurship and more.' },
+  { n: '02', i: '🛠', t: 'Learn by building', d: 'Work through bite-sized chapters with live circuits, code and projects aligned to ATL outcomes.' },
+  { n: '03', i: '🤖', t: 'Get AI mentorship', d: 'A 24×7 context-aware mentor gives hints, explanations and instant feedback whenever you are stuck.' },
+  { n: '04', i: '🏆', t: 'Ship & compete', d: 'Submit projects, climb the leaderboard and earn XP as teachers and admins track your growth live.' },
+];
+const TESTIMONIALS = [
+  { q: 'Our students went from never touching a breadboard to building autonomous robots in a single term. The platform makes innovation feel inevitable.', n: 'Anjali Mehta', r: 'ATL In-charge, Delhi Public School', a: '👩‍🏫' },
+  { q: 'The AI mentor answers doubts at midnight better than I expected. My class engagement has never been higher.', n: 'Rohan Verma', r: 'STEM Teacher, Bengaluru', a: '👨‍🏫' },
+  { q: 'As a principal I finally have live visibility into every learner. The Admin → Teacher → Student wiring is brilliant.', n: 'S. Krishnan', r: 'Principal, Chennai', a: '🧑‍💼' },
 ];
 
 // Curriculum highlighted in the hero message
@@ -49,12 +59,12 @@ const CURRICULUM = [
 
 // Live, auto-advancing hero slides
 const SLIDES = [
-  { tag: 'Robotics', t: 'Line-follower & obstacle-avoider bots', d: 'Program autonomous machines that sense, decide and move on their own.', img: '1485827404703-89b55fcc595e', g: 'linear-gradient(135deg,#1e73ff,#0b3a8c)' },
-  { tag: 'Electronics', t: 'Breadboarding & live circuits', d: 'Master voltage, current and components by building real, working circuits.', img: '1597852074816-d933c7d2b988', g: 'linear-gradient(135deg,#2563eb,#1e3a8c)' },
-  { tag: 'Embedded', t: 'Sensors, Arduino & microcontrollers', d: 'Give your projects a brain — read the world and react in real time.', img: '1553406830-ef2513450d76', g: 'linear-gradient(135deg,#1d4ed8,#0a2e6e)' },
-  { tag: 'Fabrication', t: '3D modelling & 3D printing', d: 'Turn ideas into printable objects with Tinkercad & CollabCAD.', img: '1631467018858-d7a0fa45c842', g: 'linear-gradient(135deg,#3b82f6,#15357a)' },
-  { tag: 'AIoT', t: 'IoT & AIoT integration', d: 'Connect devices to the cloud and add edge intelligence to everything.', img: '1518770660439-4636190af475', g: 'linear-gradient(135deg,#2563eb,#102b63)' },
-  { tag: 'AI / ML', t: 'AI/ML & computer vision starters', d: 'Teach machines to learn, classify and see with industry-grade tooling.', img: '1677442136019-21780ecad995', g: 'linear-gradient(135deg,#1e73ff,#0b3a8c)' },
+  { tag: 'Robotics', t: 'Line-follower & obstacle-avoider bots', d: 'Program autonomous machines that sense, decide and move on their own.', img: '1485827404703-89b55fcc595e', g: 'linear-gradient(135deg,#1e88e5cc,#0b3a8ccc)' },
+  { tag: 'Electronics', t: 'Breadboarding & live circuits', d: 'Master voltage, current and components by building real, working circuits.', img: '1597852074816-d933c7d2b988', g: 'linear-gradient(135deg,#1e88e5cc,#1e3a8ccc)' },
+  { tag: 'Embedded', t: 'Sensors, Arduino & microcontrollers', d: 'Give your projects a brain — read the world and react in real time.', img: '1553406830-ef2513450d76', g: 'linear-gradient(135deg,#1e88e5cc,#0a2e6ecc)' },
+  { tag: 'Fabrication', t: '3D modelling & 3D printing', d: 'Turn ideas into printable objects with Tinkercad & CollabCAD.', img: '1635070041078-e363dbe005cb', g: 'linear-gradient(135deg,#1e88e5cc,#15357acc)' },
+  { tag: 'AIoT', t: 'IoT & AIoT integration', d: 'Connect devices to the cloud and add edge intelligence to everything.', img: '1518770660439-4636190af475', g: 'linear-gradient(135deg,#1e88e5cc,#102b63cc)' },
+  { tag: 'AI / ML', t: 'AI/ML & computer vision starters', d: 'Teach machines to learn, classify and see with industry-grade tooling.', img: '1677442136019-21780ecad995', g: 'linear-gradient(135deg,#1e88e5cc,#0b3a8ccc)' },
 ];
 
 function HeroSlides() {
@@ -81,6 +91,7 @@ function HeroSlides() {
         ))}
         <div className="rb-slide-orb rb-orb-a" />
         <div className="rb-slide-orb rb-orb-b" />
+        <div className="rb-slide-chip rb-chip-1">⚡ 700+ chapters</div>
       </div>
       <div className="rb-slide-dots">
         {SLIDES.map((s, i) => (
@@ -99,6 +110,7 @@ function HeroSlides() {
 
 export default function Landing() {
   const { login } = useAuth();
+  const navigate = useNavigate();
   const [role, setRole] = useState<Role | null>(null);
   const [identifier, setId] = useState('');
   const [password, setPw] = useState('');
@@ -122,23 +134,20 @@ export default function Landing() {
       {/* nav */}
       <header className="rb-nav">
         <div className="rb-nav-inner">
-          <div className="rb-logo">Nerve<b>scape</b><small>ANALYTICS</small></div>
+          <div className="rb-logo">
+            <Logo size={36} style={{ marginRight: 10 }} />
+            <span>Nerve<b>scape</b><small>ANALYTICS</small></span>
+          </div>
           <nav className="rb-nav-links">
             <a href="#home">Home</a>
-            <a href="#programs">Programs</a>
+            <a onClick={() => navigate('/programs')}>Programs</a>
             <a href="#why">Why Nervescape</a>
+            <a onClick={() => navigate('/about')}>About</a>
+            <a onClick={() => navigate('/contact')}>Contact</a>
             <a onClick={openLogin}>Sign in</a>
           </nav>
-          <button className="rb-nav-cta" onClick={openLogin}>Get started</button>
         </div>
       </header>
-
-      {/* floating right tab */}
-      <button className="rb-buy-tab" onClick={openLogin}>
-        <span className="icn">🚀</span>
-        <b>Get started</b>
-        700+ chapters
-      </button>
 
       {/* hero */}
       <section id="home" className="rb-hero">
@@ -150,7 +159,7 @@ export default function Landing() {
         </div>
         <div className="rb-hero-grid">
           <div className="rb-hero-copy">
-            <span className="rb-hero-badge">⚡ ATL · Robotics · AI · STEM — Classes 1–12</span>
+            <span className="rb-hero-badge">⚡ ATL · Robotics · AI · STEM — Classes 6–12</span>
             <h1>Build. Tinker.<br /><b>Innovate from Class 6.</b></h1>
             <p className="lead">
               Nervescape Analytics is a next-generation Atal Tinkering Lab platform with a complete,
@@ -162,41 +171,12 @@ export default function Landing() {
               ))}
             </ul>
             <div className="rb-hero-actions">
-              <button className="rb-hero-cta primary" onClick={openLogin}>Get started →</button>
-              <a className="rb-hero-cta ghost" href="#programs">Explore programs</a>
+              <button className="rb-hero-cta primary" onClick={() => navigate('/programs')}>Explore programs →</button>
             </div>
           </div>
           <div className="rb-hero-art"><HeroSlides /></div>
         </div>
       </section>
-
-      {/* feature trio (overlap into hero) */}
-      <section className="rb-features">
-        <div className="rb-feat-row">
-          <div className="rb-feat">
-            <span className="rb-feat-icon">🌱</span>
-            <h3>Grow your skills</h3>
-            <p>Beginner-to-advanced learning paths in electronics, robotics, IoT, AI/ML, 3D printing &amp; entrepreneurship.</p>
-          </div>
-          <div className="rb-feat">
-            <span className="rb-feat-icon">🤖</span>
-            <h3>Automation</h3>
-            <p>Auto-graded MCQ quizzes, AI-evaluated brain teasers and real-time progress tracking — no manual work.</p>
-          </div>
-          <div className="rb-feat">
-            <span className="rb-feat-icon">📊</span>
-            <h3>Full analysis</h3>
-            <p>Live dashboards for admins, teachers and students with leaderboards, KPIs and class-wide insights.</p>
-          </div>
-        </div>
-      </section>
-
-      <div className="rb-social">
-        <h4>Find us here</h4>
-        <div className="rb-social-icons">
-          <span>f</span><span>G+</span><span>𝕏</span><span>in</span>
-        </div>
-      </div>
 
       {/* programs */}
       <section id="programs" className="rb-section">
@@ -204,13 +184,13 @@ export default function Landing() {
           <div className="rb-section-head">
             <span className="rb-kicker">What you will master</span>
             <h2>End-to-end Technology &amp; Innovation Programs</h2>
-            <p>From your first circuit to your first startup pitch — a complete maker journey for Classes 1–12.</p>
+            <p>From your first circuit to your first startup pitch — a complete maker journey for Classes 6–12.</p>
           </div>
           <div className="rb-topic-grid">
-            {TOPICS.map((tp) => (
-              <article key={tp.t} className="rb-topic">
-                <div className="rb-topic-img"><img loading="lazy" src={IMG(tp.img)} alt={tp.t} /><span className="rb-topic-tag">{tp.tag}</span></div>
-                <div className="rb-topic-body"><h3>{tp.t}</h3><p>{tp.d}</p><button className="rb-topic-btn" onClick={openLogin}>Explore →</button></div>
+            {PROGRAMS.map((tp) => (
+              <article key={tp.slug} className="rb-topic" onClick={() => navigate(`/programs/${tp.slug}`)}>
+                <div className="rb-topic-img"><img loading="lazy" src={IMG(tp.img)} alt={tp.title} /><span className="rb-topic-tag">{tp.tag}</span></div>
+                <div className="rb-topic-body"><h3>{tp.title}</h3><p>{tp.short}</p><button className="rb-topic-btn" onClick={(e) => { e.stopPropagation(); navigate(`/programs/${tp.slug}`); }}>Explore →</button></div>
               </article>
             ))}
           </div>
@@ -227,33 +207,88 @@ export default function Landing() {
           </div>
           <div className="rb-why-grid">
             {WHY.map((w) => (
-              <article key={w.t} className="rb-why">
-                <div className="rb-why-icon">{w.i}</div>
-                <h3>{w.t}</h3>
-                <p>{w.d}</p>
+              <article key={w.t} className="rb-why" style={{ ['--why-img' as any]: `url(${IMG(w.img, 800)})` }}>
+                <div className="rb-why-media" aria-hidden="true" />
+                <div className="rb-why-body">
+                  <div className="rb-why-icon">{w.i}</div>
+                  <h3>{w.t}</h3>
+                  <p>{w.d}</p>
+                </div>
               </article>
             ))}
           </div>
         </div>
       </section>
 
-      {/* footer */}
-      <footer className="rb-footer">
-        <div className="rb-footer-inner">
-          <div>
-            <div className="rb-logo" style={{ marginBottom: 12 }}>Nerve<b>scape</b><small style={{ color: '#cfd6dd' }}>ANALYTICS</small></div>
-            <p style={{ fontSize: 13, lineHeight: 1.6, color: '#cfd6dd', maxWidth: 320, margin: 0 }}>
-              Empowering Innovation in Education. A unified ATL, Robotics, AI &amp; STEM analytics platform for Classes 1–12.
-            </p>
+      {/* stats band */}
+      <section className="rb-stats">
+        <div className="rb-stats-inner">
+          {STATS.map((s) => (
+            <div key={s.l} className="rb-stat"><b>{s.n}</b><span>{s.l}</span></div>
+          ))}
+        </div>
+      </section>
+
+      {/* how it works */}
+      <section className="rb-section">
+        <div className="rb-section-inner">
+          <div className="rb-section-head">
+            <span className="rb-kicker">How it works</span>
+            <h2>From curious beginner to confident innovator</h2>
+            <p>A guided, four-step journey that turns every learner into a maker.</p>
           </div>
-          <div><h4>Programs</h4><a href="#programs">Robotics</a><a href="#programs">Electronics</a><a href="#programs">AI / ML</a><a href="#programs">IoT &amp; AIoT</a></div>
-          <div><h4>Platform</h4><a onClick={openLogin}>Student Portal</a><a onClick={openLogin}>Teacher Portal</a><a onClick={openLogin}>Admin Portal</a></div>
-          <div><h4>Get Started</h4><a onClick={openLogin}>Login</a><a href="#why">Why Nervescape</a><a href="#programs">Course Details</a></div>
+          <div className="rb-steps">
+            {STEPS.map((s) => (
+              <article key={s.n} className="rb-step">
+                <span className="rb-step-n">{s.n}</span>
+                <span className="rb-step-ico">{s.i}</span>
+                <h3>{s.t}</h3>
+                <p>{s.d}</p>
+              </article>
+            ))}
+          </div>
         </div>
-        <div className="rb-footer-bottom">
-          © {new Date().getFullYear()} Nervescape Analytics · Empowering Innovation in Education · Admin → Teacher → Student, fully wired.
+      </section>
+
+      {/* testimonials */}
+      <section className="rb-section alt">
+        <div className="rb-section-inner">
+          <div className="rb-section-head">
+            <span className="rb-kicker">Loved by schools</span>
+            <h2>Educators and leaders trust Nervescape</h2>
+            <p>Real outcomes from the classrooms already building the future.</p>
+          </div>
+          <div className="rb-tst-grid">
+            {TESTIMONIALS.map((t) => (
+              <article key={t.n} className="rb-tst">
+                <div className="rb-tst-stars">★★★★★</div>
+                <p>“{t.q}”</p>
+                <div className="rb-tst-by"><span className="rb-tst-av">{t.a}</span><div><b>{t.n}</b><small>{t.r}</small></div></div>
+              </article>
+            ))}
+          </div>
         </div>
-      </footer>
+      </section>
+
+      {/* CTA band */}
+      <section className="rb-cta-band">
+        <div className="rb-cta-inner">
+          <h2>Ready to build the future?</h2>
+          <p>Bring a world-class Atal Tinkering Lab experience to your students today.</p>
+          <div className="rb-cta-actions">
+            <button className="rb-hero-cta primary" onClick={() => navigate('/programs')}>Explore programs →</button>
+            <button className="rb-hero-cta ghost" onClick={() => navigate('/contact')}>Contact us</button>
+          </div>
+        </div>
+      </section>
+
+      {/* footer */}
+      <SiteFooter />
+
+      {/* floating AI mentor badge (bottom-right) */}
+      <button className="rb-mentor-badge" onClick={openLogin}>
+        <span className="rb-mentor-dot" />🤖 24×7 AI mentor
+      </button>
 
       {/* login modal — premium split panel */}
       {showLogin && (
@@ -261,8 +296,8 @@ export default function Landing() {
           <div className="lm-panel" onClick={(e) => e.stopPropagation()}>
             {/* left: branding */}
             <div className="lm-left">
-              <div className="lm-brand">Nerve<b>scape</b><br/><small>ANALYTICS</small></div>
-              <p className="lm-tagline">The next-generation ATL, Robotics &amp; STEM platform for Classes 1–12.</p>
+              <div className="lm-brand"><Logo size={40} style={{ marginBottom: 10 }} /><br/>Nerve<b>scape</b><br/><small>ANALYTICS</small></div>
+              <p className="lm-tagline">The next-generation ATL, Robotics &amp; STEM platform for Classes 6–12.</p>
               <ul className="lm-perks">
                 <li><span>🤖</span> AI-powered 24×7 mentor</li>
                 <li><span>📊</span> Live analytics for every role</li>
