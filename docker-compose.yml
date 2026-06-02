@@ -1,0 +1,59 @@
+# =====================================================================
+#  AI LMS — application stack (podman-compose / docker-compose)
+#  Database is a STANDALONE native PostgreSQL on the host filesystem
+#  (under /home/appuser/DB_HOME), NOT containerized. Containers reach it
+#  via host.containers.internal:${DB_PORT}.
+# =====================================================================
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    image: ai-lms-backend:1.0.0
+    container_name: lms-backend
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      API_PORT: 4000
+      # Reach the host's standalone PostgreSQL
+      DB_HOST: host.containers.internal
+      DB_PORT: ${DB_PORT:-5433}
+      DB_NAME: ${DB_NAME:-lms_db}
+      DB_USER: ${DB_USER:-appuser}
+      DB_PASSWORD: ${DB_PASSWORD:-lms_app_pwd_2026}
+      JWT_SECRET: ${JWT_SECRET:-change_me_super_secret_lms_jwt_key_2026}
+      JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-12h}
+      BCRYPT_ROUNDS: ${BCRYPT_ROUNDS:-10}
+      AI_PROVIDER: ${AI_PROVIDER:-offline}
+      AI_BASE_URL: ${AI_BASE_URL:-https://api.openai.com/v1}
+      AI_API_KEY: ${AI_API_KEY:-}
+      AI_MODEL: ${AI_MODEL:-gpt-4o-mini}
+      SEED_ADMIN_EMAIL: ${SEED_ADMIN_EMAIL:-admin@lms.local}
+      SEED_ADMIN_PASSWORD: ${SEED_ADMIN_PASSWORD:-Admin@123}
+      SEED_TEACHER_PASSWORD: ${SEED_TEACHER_PASSWORD:-Teacher@123}
+      SEED_STUDENT_PASSWORD: ${SEED_STUDENT_PASSWORD:-Student@123}
+    # Make host.containers.internal resolve to the host gateway
+    extra_hosts:
+      - "host.containers.internal:host-gateway"
+    ports:
+      - "${API_PORT:-4000}:4000"
+    networks:
+      - lms
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    image: ai-lms-frontend:1.0.0
+    container_name: lms-frontend
+    restart: unless-stopped
+    depends_on:
+      - backend
+    ports:
+      - "${WEB_PORT:-8080}:80"
+    networks:
+      - lms
+
+networks:
+  lms:
+    driver: bridge
