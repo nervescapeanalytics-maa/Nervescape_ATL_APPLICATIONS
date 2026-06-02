@@ -10,8 +10,7 @@ const REASONS = [
 ];
 
 const OFFICES = [
-  { city: 'Bengaluru', addr: 'Innovation Hub, Koramangala, Bengaluru, Karnataka 560034', tag: 'Head Office' },
-  { city: 'New Delhi', addr: 'Connaught Place, New Delhi 110001', tag: 'Regional Office' },
+  { city: 'Varanasi', addr: 'Lanka, Varanasi - 221005', tag: 'Office' },
 ];
 
 export default function Contact() {
@@ -56,8 +55,8 @@ export default function Contact() {
             </div>
 
             <div className="contact-direct">
-              <div><span className="contact-ico">✉️</span><div><b>Email</b><a href="mailto:hello@nervescape.in">hello@nervescape.in</a></div></div>
-              <div><span className="contact-ico">📞</span><div><b>Phone</b><a href="tel:+918000000000">+91 80 0000 0000</a></div></div>
+              <div><span className="contact-ico">✉️</span><div><b>Email</b><a href="mailto:support@nervescape.com">support@nervescape.com</a></div></div>
+              <div><span className="contact-ico">📞</span><div><b>Phone</b><a href="tel:+918707565776">+91 8707565776</a></div></div>
               <div><span className="contact-ico">🕘</span><div><b>Hours</b><span>Mon–Sat, 9:00 AM – 6:00 PM IST</span></div></div>
             </div>
 

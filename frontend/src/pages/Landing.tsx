@@ -59,12 +59,12 @@ const CURRICULUM = [
 
 // Live, auto-advancing hero slides
 const SLIDES = [
-  { tag: 'Robotics', t: 'Line-follower & obstacle-avoider bots', d: 'Program autonomous machines that sense, decide and move on their own.', img: '1485827404703-89b55fcc595e', g: 'linear-gradient(135deg,#1e88e5cc,#0b3a8ccc)' },
-  { tag: 'Electronics', t: 'Breadboarding & live circuits', d: 'Master voltage, current and components by building real, working circuits.', img: '1597852074816-d933c7d2b988', g: 'linear-gradient(135deg,#1e88e5cc,#1e3a8ccc)' },
-  { tag: 'Embedded', t: 'Sensors, Arduino & microcontrollers', d: 'Give your projects a brain — read the world and react in real time.', img: '1553406830-ef2513450d76', g: 'linear-gradient(135deg,#1e88e5cc,#0a2e6ecc)' },
-  { tag: 'Fabrication', t: '3D modelling & 3D printing', d: 'Turn ideas into printable objects with Tinkercad & CollabCAD.', img: '1635070041078-e363dbe005cb', g: 'linear-gradient(135deg,#1e88e5cc,#15357acc)' },
-  { tag: 'AIoT', t: 'IoT & AIoT integration', d: 'Connect devices to the cloud and add edge intelligence to everything.', img: '1518770660439-4636190af475', g: 'linear-gradient(135deg,#1e88e5cc,#102b63cc)' },
-  { tag: 'AI / ML', t: 'AI/ML & computer vision starters', d: 'Teach machines to learn, classify and see with industry-grade tooling.', img: '1677442136019-21780ecad995', g: 'linear-gradient(135deg,#1e88e5cc,#0b3a8ccc)' },
+  { tag: 'Robotics', t: 'Line-follower & obstacle-avoider bots', d: 'Program autonomous machines that sense, decide and move on their own.', img: '1485827404703-89b55fcc595e', g: 'linear-gradient(135deg,rgba(244,63,94,0.72),rgba(124,58,237,0.82))' },
+  { tag: 'Electronics', t: 'Breadboarding & live circuits', d: 'Master voltage, current and components by building real, working circuits.', img: '1597852074816-d933c7d2b988', g: 'linear-gradient(135deg,rgba(6,182,212,0.70),rgba(16,185,129,0.82))' },
+  { tag: 'Embedded', t: 'Sensors, Arduino & microcontrollers', d: 'Give your projects a brain — read the world and react in real time.', img: '1553406830-ef2513450d76', g: 'linear-gradient(135deg,rgba(251,146,60,0.70),rgba(234,88,12,0.82))' },
+  { tag: 'Fabrication', t: '3D modelling & 3D printing', d: 'Turn ideas into printable objects with Tinkercad & CollabCAD.', img: '1635070041078-e363dbe005cb', g: 'linear-gradient(135deg,rgba(139,92,246,0.70),rgba(79,70,229,0.82))' },
+  { tag: 'AIoT', t: 'IoT & AIoT integration', d: 'Connect devices to the cloud and add edge intelligence to everything.', img: '1518770660439-4636190af475', g: 'linear-gradient(135deg,rgba(14,165,233,0.70),rgba(59,130,246,0.82))' },
+  { tag: 'AI / ML', t: 'AI/ML & computer vision starters', d: 'Teach machines to learn, classify and see with industry-grade tooling.', img: '1677442136019-21780ecad995', g: 'linear-gradient(135deg,rgba(236,72,153,0.70),rgba(168,85,247,0.82))' },
 ];
 
 function HeroSlides() {
