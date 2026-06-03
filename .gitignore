@@ -27,3 +27,6 @@ npm-debug.log*
 # Postgres local data (if mounted)
 pgdata/
 data/
+# but keep frontend source data (program catalogue, etc.)
+!frontend/src/data/
+!frontend/src/data/**
