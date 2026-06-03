@@ -110,13 +110,18 @@ router.delete('/users/:id', asyncH(async (req, res) => {
 // ---- teacher assignments (wire teacher -> grade/module) ----
 router.get('/assignments', asyncH(async (_req, res) => {
   const { rows } = await query(
-    `SELECT ta.id, ta.teacher_id, t.full_name AS teacher, ta.grade_id, g.name AS grade,
-            ta.module_id, m.title AS module
+    `SELECT ta.id, ta.teacher_id, t.full_name AS teacher, t.email AS teacher_email,
+            ta.grade_id, g.name AS grade,
+            ta.module_id, m.title AS module, m.icon AS module_icon,
+            (SELECT count(*)::int FROM users u WHERE u.role='student' AND u.grade_id=ta.grade_id) AS students,
+            (SELECT count(*)::int FROM chapters c JOIN modules mm ON mm.id=c.module_id
+              WHERE mm.grade_id=ta.grade_id AND ($1::int IS NULL OR mm.id=ta.module_id)) AS chapters,
+            ta.created_at
      FROM teacher_assignments ta
      JOIN users t ON t.id=ta.teacher_id
      JOIN grades g ON g.id=ta.grade_id
      LEFT JOIN modules m ON m.id=ta.module_id
-     ORDER BY t.full_name`
+     ORDER BY t.full_name, g.number`, [null]
   );
   res.json({ assignments: rows });
 }));
@@ -131,11 +136,193 @@ router.post('/assignments', asyncH(async (req, res) => {
      RETURNING id`,
     [d.teacher_id, d.grade_id, d.module_id ?? null, req.user!.id]
   );
+  await query(
+    `INSERT INTO activity_log (actor_id, action, entity, entity_id, meta) VALUES ($1,$2,$3,$4,$5)`,
+    [req.user!.id, 'assign_teacher', 'teacher_assignments', a?.id ? String(a.id) : '-',
+     JSON.stringify({ teacher_id: d.teacher_id, grade_id: d.grade_id, module_id: d.module_id ?? null })]
+  );
   res.status(201).json({ id: a?.id ?? null });
+}));
+
+// Bulk assign — wire one teacher to many grades and/or many modules
+const bulkAssignSchema = z.object({
+  teacher_id: z.string().uuid(),
+  grade_ids: z.array(z.number().int()).default([]),
+  module_ids: z.array(z.number().int()).default([]),
+});
+router.post('/assignments/bulk', asyncH(async (req, res) => {
+  const d = bulkAssignSchema.parse(req.body);
+  let created = 0;
+  // grade-level (module_id NULL) for each grade
+  for (const gid of d.grade_ids) {
+    const r = await one<any>(
+      `INSERT INTO teacher_assignments (teacher_id, grade_id, module_id, assigned_by)
+       VALUES ($1,$2,NULL,$3) ON CONFLICT (teacher_id, grade_id, module_id) DO NOTHING RETURNING id`,
+      [d.teacher_id, gid, req.user!.id]
+    );
+    if (r) created++;
+  }
+  // module-specific assignments — derive grade_id from module
+  if (d.module_ids.length) {
+    const { rows: mods } = await query<{ id: number; grade_id: number }>(
+      `SELECT id, grade_id FROM modules WHERE id = ANY($1)`, [d.module_ids]
+    );
+    for (const m of mods) {
+      const r = await one<any>(
+        `INSERT INTO teacher_assignments (teacher_id, grade_id, module_id, assigned_by)
+         VALUES ($1,$2,$3,$4) ON CONFLICT (teacher_id, grade_id, module_id) DO NOTHING RETURNING id`,
+        [d.teacher_id, m.grade_id, m.id, req.user!.id]
+      );
+      if (r) created++;
+    }
+  }
+  await query(
+    `INSERT INTO activity_log (actor_id, action, entity, entity_id, meta) VALUES ($1,$2,$3,$4,$5)`,
+    [req.user!.id, 'assign_teacher_bulk', 'teacher_assignments', d.teacher_id, JSON.stringify({ created, ...d })]
+  );
+  res.status(201).json({ created });
 }));
 
 router.delete('/assignments/:id', asyncH(async (req, res) => {
   await query(`DELETE FROM teacher_assignments WHERE id=$1`, [Number(req.params.id)]);
+  await query(
+    `INSERT INTO activity_log (actor_id, action, entity, entity_id) VALUES ($1,$2,$3,$4)`,
+    [req.user!.id, 'unassign_teacher', 'teacher_assignments', req.params.id]
+  );
+  res.json({ ok: true });
+}));
+
+// ---- modules CRUD (Item 14: Course management) ----
+const moduleSchema = z.object({
+  grade_id: z.number().int(),
+  title: z.string().min(2),
+  slug: z.string().optional(),
+  icon: z.string().optional(),
+  color: z.string().optional(),
+  description: z.string().optional(),
+  order_index: z.number().int().optional(),
+});
+router.post('/modules', asyncH(async (req, res) => {
+  const d = moduleSchema.parse(req.body);
+  const slug = (d.slug || d.title).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 60);
+  const ord = await one<any>(`SELECT COALESCE(max(order_index),0)+1 AS n FROM modules WHERE grade_id=$1`, [d.grade_id]);
+  const m = await one<any>(
+    `INSERT INTO modules (grade_id, title, slug, icon, color, description, order_index)
+     VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id, title, slug`,
+    [d.grade_id, d.title, slug, d.icon ?? '📘', d.color ?? '#6366f1', d.description ?? '', d.order_index ?? ord!.n]
+  );
+  await query(
+    `INSERT INTO activity_log (actor_id, action, entity, entity_id, meta) VALUES ($1,$2,$3,$4,$5)`,
+    [req.user!.id, 'create_module', 'module', String(m!.id), JSON.stringify({ grade_id: d.grade_id, title: d.title })]
+  );
+  res.status(201).json({ module: m });
+}));
+
+router.put('/modules/:id', asyncH(async (req, res) => {
+  const id = Number(req.params.id);
+  const d = moduleSchema.partial().parse(req.body);
+  const sets: string[] = []; const params: any[] = []; let i = 1;
+  for (const [k, v] of Object.entries(d)) {
+    if (v === undefined) continue;
+    sets.push(`${k}=$${i++}`); params.push(v);
+  }
+  if (!sets.length) throw httpError(400, 'No fields');
+  params.push(id);
+  const m = await one<any>(`UPDATE modules SET ${sets.join(', ')} WHERE id=$${i} RETURNING id, title`, params);
+  if (!m) throw httpError(404, 'Module not found');
+  await query(
+    `INSERT INTO activity_log (actor_id, action, entity, entity_id, meta) VALUES ($1,$2,$3,$4,$5)`,
+    [req.user!.id, 'update_module', 'module', String(id), JSON.stringify(d)]
+  );
+  res.json({ module: m });
+}));
+
+router.delete('/modules/:id', asyncH(async (req, res) => {
+  const id = Number(req.params.id);
+  const usage = await one<any>(`SELECT count(*)::int AS n FROM chapters WHERE module_id=$1`, [id]);
+  if (usage && usage.n > 0) {
+    throw httpError(409, `Module has ${usage.n} chapter(s). Delete chapters first or use ?force=1.`);
+  }
+  await query(`DELETE FROM teacher_assignments WHERE module_id=$1`, [id]);
+  const r = await query(`DELETE FROM modules WHERE id=$1`, [id]);
+  if (!r.rowCount) throw httpError(404, 'Module not found');
+  await query(
+    `INSERT INTO activity_log (actor_id, action, entity, entity_id) VALUES ($1,$2,$3,$4)`,
+    [req.user!.id, 'delete_module', 'module', String(id)]
+  );
+  res.json({ ok: true });
+}));
+
+// ---- chapter CRUD (admin) ----
+// (teacher.ts already exposes POST /teacher/chapters and PUT /teacher/chapters/:id;
+//  expose the same for admins plus a DELETE)
+const chapterCreateSchema = z.object({
+  module_id: z.number().int(),
+  title: z.string().min(2),
+  summary: z.string().optional(),
+  difficulty: z.string().default('beginner'),
+  est_minutes: z.number().int().optional(),
+});
+router.post('/chapters', asyncH(async (req, res) => {
+  const d = chapterCreateSchema.parse(req.body);
+  const slug = d.title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 60) + '-' + Date.now().toString(36);
+  const ord = await one<any>(`SELECT COALESCE(max(order_index),0)+1 AS n FROM chapters WHERE module_id=$1`, [d.module_id]);
+  const ch = await one<any>(
+    `INSERT INTO chapters (module_id, title, slug, summary, difficulty, est_minutes, order_index, created_by, updated_by)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$8) RETURNING id, title, slug`,
+    [d.module_id, d.title, slug, d.summary ?? '', d.difficulty, d.est_minutes ?? 60, ord!.n, req.user!.id]
+  );
+  await query(
+    `INSERT INTO activity_log (actor_id, action, entity, entity_id) VALUES ($1,$2,$3,$4)`,
+    [req.user!.id, 'create_chapter', 'chapter', String(ch!.id)]
+  );
+  res.status(201).json({ chapter: ch });
+}));
+
+const chapterPatchSchema = z.object({
+  title: z.string().min(2).optional(),
+  summary: z.string().optional(),
+  difficulty: z.string().optional(),
+  est_minutes: z.number().int().optional(),
+  order_index: z.number().int().optional(),
+  is_published: z.boolean().optional(),
+  hero_image: z.string().nullable().optional(),
+});
+router.put('/chapters/:id', asyncH(async (req, res) => {
+  const id = Number(req.params.id);
+  const d = chapterPatchSchema.parse(req.body);
+  const sets: string[] = []; const params: any[] = []; let i = 1;
+  for (const [k, v] of Object.entries(d)) {
+    if (v === undefined) continue;
+    sets.push(`${k}=$${i++}`); params.push(v);
+  }
+  sets.push(`updated_by=$${i++}`); params.push(req.user!.id);
+  if (sets.length === 1) throw httpError(400, 'No fields');
+  params.push(id);
+  const ch = await one<any>(`UPDATE chapters SET ${sets.join(', ')} WHERE id=$${i} RETURNING id, title, is_published`, params);
+  if (!ch) throw httpError(404, 'Chapter not found');
+  await query(
+    `INSERT INTO activity_log (actor_id, action, entity, entity_id, meta) VALUES ($1,$2,$3,$4,$5)`,
+    [req.user!.id, 'update_chapter', 'chapter', String(id), JSON.stringify(d)]
+  );
+  res.json({ chapter: ch });
+}));
+
+router.delete('/chapters/:id', asyncH(async (req, res) => {
+  const id = Number(req.params.id);
+  // cascade in correct order
+  await query(`DELETE FROM facts WHERE chapter_id=$1`, [id]);
+  await query(`DELETE FROM questions WHERE chapter_id=$1`, [id]);
+  await query(`DELETE FROM challenge_submissions WHERE chapter_id=$1`, [id]);
+  await query(`DELETE FROM chat_messages WHERE chapter_id=$1`, [id]);
+  await query(`DELETE FROM quiz_attempts WHERE chapter_id=$1`, [id]);
+  await query(`DELETE FROM progress WHERE chapter_id=$1`, [id]);
+  const r = await query(`DELETE FROM chapters WHERE id=$1`, [id]);
+  if (!r.rowCount) throw httpError(404, 'Chapter not found');
+  await query(
+    `INSERT INTO activity_log (actor_id, action, entity, entity_id) VALUES ($1,$2,$3,$4)`,
+    [req.user!.id, 'delete_chapter', 'chapter', String(id)]
+  );
   res.json({ ok: true });
 }));
 

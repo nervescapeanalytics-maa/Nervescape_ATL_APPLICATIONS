@@ -386,50 +386,246 @@ function Assignments() {
   const [rows, setRows] = useState<any[]>([]);
   const [teachers, setTeachers] = useState<any[]>([]);
   const [grades, setGrades] = useState<any[]>([]);
+  const [modulesByGrade, setModulesByGrade] = useState<Record<number, any[]>>({});
   const [tid, setTid] = useState('');
   const [gid, setGid] = useState<number | ''>('');
+  const [mid, setMid] = useState<number | ''>('');
+  const [filterTeacher, setFilterTeacher] = useState('');
+  const [filterGrade, setFilterGrade] = useState<number | ''>('');
+  const [showBulk, setShowBulk] = useState(false);
+  const [bulkTeacher, setBulkTeacher] = useState('');
+  const [bulkGrades, setBulkGrades] = useState<number[]>([]);
+  const [bulkModules, setBulkModules] = useState<number[]>([]);
+  const [msg, setMsg] = useState('');
 
   function load() { apiGet<{ assignments: any[] }>('/admin/assignments').then((r) => setRows(r.assignments)).catch(() => {}); }
+
+  async function loadModulesForGrade(g: number) {
+    if (modulesByGrade[g]) return;
+    try {
+      const r = await apiGet<any>(`/content/grades/${g}/modules`);
+      setModulesByGrade((prev) => ({ ...prev, [g]: r.modules || [] }));
+    } catch { /* ignore */ }
+  }
+
   useEffect(() => {
     load();
     apiGet('/admin/users?role=teacher').then((r: any) => setTeachers(r.users)).catch(() => {});
-    apiGet('/content/grades').then((r: any) => setGrades(r.grades)).catch(() => {});
+    apiGet('/admin/grades').then((r: any) => setGrades(r.grades)).catch(() => {});
   }, []);
+
+  useEffect(() => { if (gid !== '') loadModulesForGrade(Number(gid)); setMid(''); /* eslint-disable-next-line */ }, [gid]);
 
   async function add() {
     if (!tid || gid === '') return;
-    await apiPost('/admin/assignments', { teacher_id: tid, grade_id: Number(gid), module_id: null });
-    setTid(''); setGid(''); load();
+    try {
+      await apiPost('/admin/assignments', { teacher_id: tid, grade_id: Number(gid), module_id: mid === '' ? null : Number(mid) });
+      setTid(''); setGid(''); setMid(''); load(); setMsg('Assignment created.');
+    } catch (e: any) { setMsg('Error: ' + (e?.message || 'failed')); }
+    setTimeout(() => setMsg(''), 2500);
   }
-  async function del(id: number) { await apiDel(`/admin/assignments/${id}`); load(); }
+
+  async function bulkSave() {
+    if (!bulkTeacher || (!bulkGrades.length && !bulkModules.length)) return;
+    try {
+      const r: any = await apiPost('/admin/assignments/bulk', { teacher_id: bulkTeacher, grade_ids: bulkGrades, module_ids: bulkModules });
+      setMsg(`Bulk assignment created: ${r.created} new link(s).`);
+      setBulkTeacher(''); setBulkGrades([]); setBulkModules([]); setShowBulk(false); load();
+    } catch (e: any) { setMsg('Error: ' + (e?.message || 'failed')); }
+    setTimeout(() => setMsg(''), 4000);
+  }
+
+  async function del(id: number) {
+    if (!confirm('Remove this assignment?')) return;
+    await apiDel(`/admin/assignments/${id}`); load();
+  }
+
+  // Group rows by teacher for the matrix view
+  const filtered = rows.filter((r) => {
+    if (filterTeacher && r.teacher_id !== filterTeacher) return false;
+    if (filterGrade !== '' && r.grade_id !== Number(filterGrade)) return false;
+    return true;
+  });
+  const groupedByTeacher: Record<string, any[]> = {};
+  for (const r of filtered) (groupedByTeacher[r.teacher_id] ||= []).push(r);
+
+  const moduleOptionsForGid = gid !== '' ? (modulesByGrade[Number(gid)] || []) : [];
 
   return (
     <div className="grid">
+      <div className="card pad dash-hero" style={{ background: 'linear-gradient(120deg,#22243a,#3d3169)' }}>
+        <div>
+          <span className="kicker">CLASS ASSIGNMENTS</span>
+          <h2 style={{ color: '#fff', margin: '8px 0 6px' }}>🔗 Teacher → Class Wiring</h2>
+          <p style={{ color: '#cdcce8', margin: 0 }}>Assign teachers to whole classes or to specific subject modules. Use bulk assign for fast onboarding of new educators.</p>
+        </div>
+      </div>
+
+      {msg && <div className="card pad" style={{ background: '#e8f5e9', color: '#1b5e20', fontSize: 14 }}>{msg}</div>}
+
       <div className="card pad">
-        <h3 style={{ marginTop: 0 }}>Wire a teacher to a class</h3>
-        <div className="row wrap">
-          <select value={tid} onChange={(e) => setTid(e.target.value)} style={{ maxWidth: 240 }}>
+        <div className="row between" style={{ marginBottom: 10, flexWrap: 'wrap', gap: 8 }}>
+          <h3 style={{ margin: 0 }}>➕ New Assignment</h3>
+          <button className="btn ghost sm" onClick={() => setShowBulk(true)}>📦 Bulk assign</button>
+        </div>
+        <div className="row wrap" style={{ gap: 8 }}>
+          <select value={tid} onChange={(e) => setTid(e.target.value)} style={{ minWidth: 220 }}>
             <option value="">— teacher —</option>
             {teachers.map((t) => <option key={t.id} value={t.id}>{t.full_name}</option>)}
           </select>
-          <select value={gid} onChange={(e) => setGid(e.target.value === '' ? '' : Number(e.target.value))} style={{ maxWidth: 200 }}>
+          <select value={gid} onChange={(e) => setGid(e.target.value === '' ? '' : Number(e.target.value))} style={{ minWidth: 180 }}>
             <option value="">— class —</option>
             {grades.map((g) => <option key={g.id} value={g.id}>{g.name}</option>)}
           </select>
-          <button className="btn" onClick={add}>Assign</button>
+          <select value={mid} onChange={(e) => setMid(e.target.value === '' ? '' : Number(e.target.value))} style={{ minWidth: 220 }} disabled={gid === ''}>
+            <option value="">All modules (entire class)</option>
+            {moduleOptionsForGid.map((m: any) => <option key={m.id} value={m.id}>{m.icon} {m.title}</option>)}
+          </select>
+          <button className="btn" onClick={add} disabled={!tid || gid === ''}>Assign</button>
         </div>
       </div>
+
       <div className="card pad">
-        <table>
-          <thead><tr><th>Teacher</th><th>Class</th><th>Module</th><th></th></tr></thead>
-          <tbody>
-            {rows.map((r) => (
-              <tr key={r.id}><td>{r.teacher}</td><td>{r.grade}</td><td>{r.module || 'All modules'}</td>
-                <td><button className="btn danger sm" onClick={() => del(r.id)}>Remove</button></td></tr>
+        <div className="row between" style={{ marginBottom: 10, flexWrap: 'wrap', gap: 8 }}>
+          <h3 style={{ margin: 0 }}>📋 Current Assignments ({filtered.length})</h3>
+          <div className="row" style={{ gap: 6 }}>
+            <select value={filterTeacher} onChange={(e) => setFilterTeacher(e.target.value)}>
+              <option value="">All teachers</option>
+              {teachers.map((t) => <option key={t.id} value={t.id}>{t.full_name}</option>)}
+            </select>
+            <select value={filterGrade} onChange={(e) => setFilterGrade(e.target.value === '' ? '' : Number(e.target.value))}>
+              <option value="">All classes</option>
+              {grades.map((g) => <option key={g.id} value={g.id}>{g.name}</option>)}
+            </select>
+          </div>
+        </div>
+        {filtered.length === 0 ? (
+          <div className="muted" style={{ padding: 16 }}>No assignments match the filters.</div>
+        ) : (
+          <div className="grid" style={{ gap: 12 }}>
+            {Object.entries(groupedByTeacher).map(([tId, list]) => {
+              const t = teachers.find((x) => x.id === tId) || { full_name: list[0].teacher, email: list[0].teacher_email };
+              return (
+                <div key={tId} className="card pad" style={{ background: '#fafafa' }}>
+                  <div className="row between" style={{ marginBottom: 8 }}>
+                    <div>
+                      <b>👩‍🏫 {t.full_name}</b>{' '}
+                      <span className="muted" style={{ fontSize: 12 }}>{t.email}</span>
+                    </div>
+                    <span className="tag">{list.length} link{list.length === 1 ? '' : 's'}</span>
+                  </div>
+                  <table>
+                    <thead><tr><th>Class</th><th>Module</th><th>Students</th><th>Chapters</th><th>Since</th><th></th></tr></thead>
+                    <tbody>
+                      {list.map((r: any) => (
+                        <tr key={r.id}>
+                          <td><b>{r.grade}</b></td>
+                          <td>{r.module ? <>{r.module_icon} {r.module}</> : <span className="muted">All modules</span>}</td>
+                          <td>{r.students}</td>
+                          <td>{r.chapters}</td>
+                          <td className="muted" style={{ fontSize: 12 }}>{new Date(r.created_at).toLocaleDateString()}</td>
+                          <td><button className="btn danger sm" onClick={() => del(r.id)}>Remove</button></td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      {showBulk && (
+        <BulkAssignModal
+          teachers={teachers}
+          grades={grades}
+          onClose={() => setShowBulk(false)}
+          teacher={bulkTeacher}
+          setTeacher={setBulkTeacher}
+          gradeIds={bulkGrades}
+          setGradeIds={setBulkGrades}
+          moduleIds={bulkModules}
+          setModuleIds={setBulkModules}
+          modulesByGrade={modulesByGrade}
+          loadModulesForGrade={loadModulesForGrade}
+          onSave={bulkSave}
+        />
+      )}
+    </div>
+  );
+}
+
+function BulkAssignModal(props: {
+  teachers: any[]; grades: any[];
+  onClose: () => void; onSave: () => void;
+  teacher: string; setTeacher: (v: string) => void;
+  gradeIds: number[]; setGradeIds: (v: number[]) => void;
+  moduleIds: number[]; setModuleIds: (v: number[]) => void;
+  modulesByGrade: Record<number, any[]>; loadModulesForGrade: (g: number) => void;
+}) {
+  const { teachers, grades, onClose, onSave, teacher, setTeacher, gradeIds, setGradeIds, moduleIds, setModuleIds, modulesByGrade, loadModulesForGrade } = props;
+  function toggleGrade(id: number) {
+    if (gradeIds.includes(id)) setGradeIds(gradeIds.filter((g) => g !== id));
+    else { setGradeIds([...gradeIds, id]); loadModulesForGrade(id); }
+  }
+  function toggleModule(id: number) {
+    if (moduleIds.includes(id)) setModuleIds(moduleIds.filter((m) => m !== id));
+    else setModuleIds([...moduleIds, id]);
+  }
+  return (
+    <div className="modal-bg" onClick={onClose}>
+      <div className="modal" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 720 }}>
+        <div className="row between" style={{ marginBottom: 12 }}>
+          <h3 style={{ margin: 0 }}>📦 Bulk Assignment</h3>
+          <button className="btn ghost sm" onClick={onClose}>✕</button>
+        </div>
+        <p className="muted" style={{ fontSize: 13 }}>Assign one teacher to many classes (full-class) and/or many specific modules at once.</p>
+        <div className="field" style={{ marginBottom: 12 }}>
+          <label>Teacher</label>
+          <select value={teacher} onChange={(e) => setTeacher(e.target.value)}>
+            <option value="">— select —</option>
+            {teachers.map((t) => <option key={t.id} value={t.id}>{t.full_name}</option>)}
+          </select>
+        </div>
+        <div className="field">
+          <label>Whole-class assignments (any module within these classes)</label>
+          <div className="row wrap" style={{ gap: 6 }}>
+            {grades.map((g) => (
+              <button key={g.id} className={`btn sm ${gradeIds.includes(g.id) ? '' : 'ghost'}`} onClick={() => toggleGrade(g.id)}>
+                {gradeIds.includes(g.id) ? '✓ ' : ''}{g.name}
+              </button>
             ))}
-            {rows.length === 0 && <tr><td colSpan={4} className="muted">No assignments yet.</td></tr>}
-          </tbody>
-        </table>
+          </div>
+        </div>
+        <div className="field" style={{ marginTop: 12 }}>
+          <label>Specific module assignments</label>
+          <div style={{ maxHeight: 260, overflow: 'auto', border: '1px solid var(--border)', borderRadius: 6, padding: 10 }}>
+            {grades.map((g) => {
+              const mods = modulesByGrade[g.id] || [];
+              return (
+                <div key={g.id} style={{ marginBottom: 10 }}>
+                  <div className="row between" style={{ marginBottom: 4 }}>
+                    <b style={{ fontSize: 13 }}>{g.name}</b>
+                    <button className="btn ghost sm" onClick={() => loadModulesForGrade(g.id)}>{mods.length ? `${mods.length} modules` : 'Load modules'}</button>
+                  </div>
+                  <div className="row wrap" style={{ gap: 6 }}>
+                    {mods.map((m: any) => (
+                      <button key={m.id} className={`btn sm ${moduleIds.includes(m.id) ? '' : 'ghost'}`} onClick={() => toggleModule(m.id)} style={{ fontSize: 12 }}>
+                        {moduleIds.includes(m.id) ? '✓ ' : ''}{m.icon} {m.title}
+                      </button>
+                    ))}
+                    {mods.length === 0 && <span className="muted" style={{ fontSize: 12 }}>(click 'Load modules')</span>}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+        <div className="row" style={{ gap: 8, marginTop: 14 }}>
+          <button className="btn" onClick={onSave} disabled={!teacher || (gradeIds.length === 0 && moduleIds.length === 0)}>Create assignments</button>
+          <button className="btn ghost" onClick={onClose}>Cancel</button>
+        </div>
       </div>
     </div>
   );
@@ -484,50 +680,196 @@ function Courses() {
   const [grades, setGrades] = useState<any[]>([]);
   const [selGrade, setSelGrade] = useState<number | null>(null);
   const [modules, setModules] = useState<any[]>([]);
+  const [editMod, setEditMod] = useState<any | null>(null);
+  const [editChap, setEditChap] = useState<any | null>(null);
+  const [newModFor, setNewModFor] = useState<number | null>(null);
+  const [newChapFor, setNewChapFor] = useState<number | null>(null);
+  const [msg, setMsg] = useState('');
 
-  useEffect(() => {
-    apiGet<any>('/content/grades').then((r) => { setGrades(r.grades); if (r.grades.length) setSelGrade(r.grades[0].id); }).catch(() => {});
-  }, []);
+  function loadGrades() { apiGet<any>('/admin/grades').then((r) => { setGrades(r.grades); if (!selGrade && r.grades.length) setSelGrade(r.grades[0].id); }).catch(() => {}); }
+  function loadModules(gid: number) { apiGet<any>(`/content/grades/${gid}/modules`).then((r) => setModules(r.modules)).catch(() => {}); }
 
-  useEffect(() => {
-    if (!selGrade) return;
-    apiGet<any>(`/content/modules?grade_id=${selGrade}`).then((r) => setModules(r.modules)).catch(() => {});
-  }, [selGrade]);
+  useEffect(() => { loadGrades(); }, []);
+  useEffect(() => { if (selGrade) loadModules(selGrade); }, [selGrade]);
+
+  function flash(m: string) { setMsg(m); setTimeout(() => setMsg(''), 2500); }
+
+  async function saveModule(d: any) {
+    try {
+      if (d.id) await apiPut(`/admin/modules/${d.id}`, d);
+      else await apiPost('/admin/modules', { ...d, grade_id: selGrade });
+      setEditMod(null); setNewModFor(null); flash('Module saved.'); if (selGrade) loadModules(selGrade);
+    } catch (e: any) { alert(e?.message || 'Save failed'); }
+  }
+  async function deleteModule(id: number, title: string) {
+    if (!confirm(`Delete module "${title}"? This is only allowed if it has no chapters.`)) return;
+    try { await apiDel(`/admin/modules/${id}`); flash('Module deleted.'); if (selGrade) loadModules(selGrade); }
+    catch (e: any) { alert(e?.message || 'Delete failed (may have chapters or assignments).'); }
+  }
+  async function saveChapter(d: any) {
+    try {
+      if (d.id) await apiPut(`/admin/chapters/${d.id}`, d);
+      else await apiPost('/admin/chapters', d);
+      setEditChap(null); setNewChapFor(null); flash('Chapter saved.'); if (selGrade) loadModules(selGrade);
+    } catch (e: any) { alert(e?.message || 'Save failed'); }
+  }
+  async function deleteChapter(id: number, title: string) {
+    if (!confirm(`Permanently delete chapter "${title}"?\nAll questions, facts, attempts and chat history for this chapter will also be removed.`)) return;
+    try { await apiDel(`/admin/chapters/${id}`); flash('Chapter deleted.'); if (selGrade) loadModules(selGrade); }
+    catch (e: any) { alert(e?.message || 'Delete failed'); }
+  }
+  async function togglePublished(c: any) {
+    try { await apiPut(`/admin/chapters/${c.id}`, { is_published: !c.is_published }); if (selGrade) loadModules(selGrade); }
+    catch (e: any) { alert(e?.message || 'Toggle failed'); }
+  }
 
   return (
     <div className="grid">
-      <div className="card pad">
-        <div className="row" style={{ gap: 12, flexWrap: 'wrap' }}>
-          <b>Class:</b>
-          {grades.map((g) => (
-            <button key={g.id} className={`btn ghost sm${selGrade === g.id ? ' active' : ''}`} onClick={() => setSelGrade(g.id)}>{g.name}</button>
-          ))}
+      <div className="card pad dash-hero" style={{ background: 'linear-gradient(120deg,#1e2a52,#3a5fb1)' }}>
+        <div>
+          <span className="kicker">CURRICULUM MANAGEMENT</span>
+          <h2 style={{ color: '#fff', margin: '8px 0 6px' }}>📚 Courses & Chapters</h2>
+          <p style={{ color: '#cbd6f5', margin: 0 }}>Create, edit, reorder, publish/unpublish and delete modules and chapters across every class.</p>
         </div>
       </div>
+
+      {msg && <div className="card pad" style={{ background: '#e8f5e9', color: '#1b5e20', fontSize: 14 }}>{msg}</div>}
+
+      <div className="card pad">
+        <div className="row between" style={{ flexWrap: 'wrap', gap: 10 }}>
+          <div className="row" style={{ gap: 8, flexWrap: 'wrap' }}>
+            <b>Class:</b>
+            {grades.map((g) => (
+              <button key={g.id} className={`btn sm ${selGrade === g.id ? '' : 'ghost'}`} onClick={() => setSelGrade(g.id)}>{g.name}</button>
+            ))}
+          </div>
+          <button className="btn sm" disabled={!selGrade} onClick={() => setNewModFor(selGrade)}>➕ New Module</button>
+        </div>
+      </div>
+
       {modules.map((m) => (
         <div key={m.id} className="card pad">
-          <div className="row between" style={{ marginBottom: 8 }}>
-            <h3 style={{ margin: 0 }}>{m.icon} {m.title}</h3>
-            <span className="tag">{m.chapters?.length || 0} chapters</span>
+          <div className="row between" style={{ marginBottom: 10, flexWrap: 'wrap', gap: 8 }}>
+            <div>
+              <h3 style={{ margin: 0 }}><span style={{ background: m.color || '#6366f1', color: '#fff', padding: '2px 10px', borderRadius: 6, marginRight: 8 }}>{m.icon || '📘'}</span>{m.title}</h3>
+              <div className="muted" style={{ fontSize: 13, marginTop: 4 }}>{m.description || <i>No description</i>}</div>
+            </div>
+            <div className="row" style={{ gap: 6 }}>
+              <span className="tag">{(m.chapters || []).length} chapters</span>
+              <button className="btn ghost sm" onClick={() => setNewChapFor(m.id)}>➕ Chapter</button>
+              <button className="btn ghost sm" onClick={() => setEditMod(m)}>✏️ Edit</button>
+              <button className="btn danger sm" onClick={() => deleteModule(m.id, m.title)}>🗑</button>
+            </div>
           </div>
-          <p className="muted" style={{ fontSize: 13, margin: '0 0 10px' }}>{m.description}</p>
           <table>
-            <thead><tr><th>#</th><th>Chapter</th><th>Difficulty</th><th>Est.</th><th>Published</th></tr></thead>
+            <thead><tr><th>#</th><th>Chapter</th><th>Difficulty</th><th>Est.</th><th>Status</th><th></th></tr></thead>
             <tbody>
               {(m.chapters || []).map((c: any, i: number) => (
                 <tr key={c.id}>
                   <td className="muted">{i + 1}</td>
-                  <td>{c.title}</td>
+                  <td>{c.title}<br /><span className="muted" style={{ fontSize: 11 }}>{c.summary?.slice(0, 80)}</span></td>
                   <td><span className="tag">{c.difficulty}</span></td>
                   <td className="muted">{c.est_minutes}m</td>
-                  <td>{c.is_published ? <span style={{ color: 'var(--green)' }}>✓</span> : <span className="muted">—</span>}</td>
+                  <td>
+                    <button className={`btn sm ${c.is_published ? '' : 'ghost'}`} onClick={() => togglePublished(c)} style={{ minWidth: 96 }}>
+                      {c.is_published ? '✓ Published' : '◌ Draft'}
+                    </button>
+                  </td>
+                  <td>
+                    <div className="row" style={{ gap: 4 }}>
+                      <button className="btn ghost sm" onClick={() => setEditChap({ ...c, module_id: m.id })}>✏️</button>
+                      <button className="btn danger sm" onClick={() => deleteChapter(c.id, c.title)}>🗑</button>
+                    </div>
+                  </td>
                 </tr>
               ))}
-              {(!m.chapters || m.chapters.length === 0) && <tr><td colSpan={5} className="muted">No chapters yet.</td></tr>}
+              {(!m.chapters || m.chapters.length === 0) && <tr><td colSpan={6} className="muted" style={{ padding: 14 }}>No chapters yet. Click "➕ Chapter" to add one.</td></tr>}
             </tbody>
           </table>
         </div>
       ))}
+      {modules.length === 0 && selGrade && (
+        <div className="card pad muted" style={{ padding: 24, textAlign: 'center' }}>No modules in this class yet. Click "➕ New Module" above.</div>
+      )}
+
+      {(editMod || newModFor !== null) && (
+        <ModuleEditor
+          initial={editMod || { grade_id: selGrade, title: '', icon: '📘', color: '#6366f1', description: '' }}
+          onClose={() => { setEditMod(null); setNewModFor(null); }}
+          onSave={saveModule}
+        />
+      )}
+      {(editChap || newChapFor !== null) && (
+        <ChapterEditor
+          initial={editChap || { module_id: newChapFor, title: '', summary: '', difficulty: 'beginner', est_minutes: 60 }}
+          onClose={() => { setEditChap(null); setNewChapFor(null); }}
+          onSave={saveChapter}
+        />
+      )}
+    </div>
+  );
+}
+
+function ModuleEditor({ initial, onClose, onSave }: { initial: any; onClose: () => void; onSave: (d: any) => void }) {
+  const [d, setD] = useState<any>(initial);
+  return (
+    <div className="modal-bg" onClick={onClose}>
+      <div className="modal" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 540 }}>
+        <div className="row between" style={{ marginBottom: 12 }}>
+          <h3 style={{ margin: 0 }}>{d.id ? '✏️ Edit Module' : '➕ New Module'}</h3>
+          <button className="btn ghost sm" onClick={onClose}>✕</button>
+        </div>
+        <div className="grid2" style={{ gap: 10 }}>
+          <div className="field" style={{ gridColumn: '1 / span 2' }}><label>Title</label><input value={d.title || ''} onChange={(e) => setD({ ...d, title: e.target.value })} /></div>
+          <div className="field"><label>Icon (emoji)</label><input value={d.icon || ''} onChange={(e) => setD({ ...d, icon: e.target.value })} placeholder="🤖" /></div>
+          <div className="field"><label>Accent Color</label><input type="color" value={d.color || '#6366f1'} onChange={(e) => setD({ ...d, color: e.target.value })} /></div>
+          <div className="field" style={{ gridColumn: '1 / span 2' }}><label>Description</label><textarea rows={3} value={d.description || ''} onChange={(e) => setD({ ...d, description: e.target.value })} /></div>
+          <div className="field"><label>Order Index</label><input type="number" value={d.order_index ?? ''} onChange={(e) => setD({ ...d, order_index: e.target.value === '' ? undefined : Number(e.target.value) })} /></div>
+        </div>
+        <div className="row" style={{ gap: 8, marginTop: 14 }}>
+          <button className="btn" disabled={!d.title || !d.grade_id} onClick={() => onSave(d)}>{d.id ? 'Save Changes' : 'Create Module'}</button>
+          <button className="btn ghost" onClick={onClose}>Cancel</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ChapterEditor({ initial, onClose, onSave }: { initial: any; onClose: () => void; onSave: (d: any) => void }) {
+  const [d, setD] = useState<any>(initial);
+  return (
+    <div className="modal-bg" onClick={onClose}>
+      <div className="modal" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 600 }}>
+        <div className="row between" style={{ marginBottom: 12 }}>
+          <h3 style={{ margin: 0 }}>{d.id ? '✏️ Edit Chapter' : '➕ New Chapter'}</h3>
+          <button className="btn ghost sm" onClick={onClose}>✕</button>
+        </div>
+        <p className="muted" style={{ fontSize: 12, marginTop: 0 }}>Rich block content (lessons, code, images) is edited from the Teacher portal. Here you manage the chapter's metadata and lifecycle.</p>
+        <div className="grid2" style={{ gap: 10 }}>
+          <div className="field" style={{ gridColumn: '1 / span 2' }}><label>Title</label><input value={d.title || ''} onChange={(e) => setD({ ...d, title: e.target.value })} /></div>
+          <div className="field" style={{ gridColumn: '1 / span 2' }}><label>Summary</label><textarea rows={3} value={d.summary || ''} onChange={(e) => setD({ ...d, summary: e.target.value })} /></div>
+          <div className="field"><label>Difficulty</label>
+            <select value={d.difficulty || 'beginner'} onChange={(e) => setD({ ...d, difficulty: e.target.value })}>
+              <option value="beginner">Beginner</option>
+              <option value="intermediate">Intermediate</option>
+              <option value="advanced">Advanced</option>
+            </select>
+          </div>
+          <div className="field"><label>Est. Minutes</label><input type="number" value={d.est_minutes ?? 60} onChange={(e) => setD({ ...d, est_minutes: Number(e.target.value) })} /></div>
+          {d.id && (
+            <div className="field"><label>Order Index</label><input type="number" value={d.order_index ?? ''} onChange={(e) => setD({ ...d, order_index: e.target.value === '' ? undefined : Number(e.target.value) })} /></div>
+          )}
+          {d.id && (
+            <div className="field"><label>Published</label>
+              <button className={`btn sm ${d.is_published ? '' : 'ghost'}`} onClick={() => setD({ ...d, is_published: !d.is_published })}>{d.is_published ? '✓ Published' : '◌ Draft'}</button>
+            </div>
+          )}
+        </div>
+        <div className="row" style={{ gap: 8, marginTop: 14 }}>
+          <button className="btn" disabled={!d.title || !d.module_id} onClick={() => onSave(d)}>{d.id ? 'Save Changes' : 'Create Chapter'}</button>
+          <button className="btn ghost" onClick={onClose}>Cancel</button>
+        </div>
+      </div>
     </div>
   );
 }
