@@ -26,6 +26,10 @@ export default function AdminPortal() {
         { key: 'schools', label: 'Schools', icon: '🏫', group: 'Operations' },
         { key: 'live', label: 'Live Classes', icon: '📡', group: 'Operations' },
         { key: 'finance', label: 'Finance', icon: '💰', group: 'Operations' },
+        { key: 'reports', label: 'Reports', icon: '📈', group: 'Governance' },
+        { key: 'audit', label: 'Audit Log', icon: '🛡️', group: 'Governance' },
+        { key: 'iam', label: 'Access Control', icon: '🔐', group: 'Governance' },
+        { key: 'retention', label: 'Data Retention', icon: '🗄️', group: 'Governance' },
         { key: 'ai', label: 'AI Platform', icon: '🤖', group: 'System' },
       ]}
     >
@@ -39,6 +43,10 @@ export default function AdminPortal() {
       {tab === 'schools' && <Schools />}
       {tab === 'live' && <LiveClasses />}
       {tab === 'finance' && <Finance />}
+      {tab === 'reports' && <Reports />}
+      {tab === 'audit' && <AuditLog />}
+      {tab === 'iam' && <IamMatrix />}
+      {tab === 'retention' && <Retention />}
       {tab === 'ai' && <AiMonitor />}
       {tab === 'settings' && <Settings />}
       {tab === 'profile' && <AdminProfile />}
@@ -801,32 +809,50 @@ function Finance() {
 }
 
 function AiMonitor() {
-  const [data, setData] = useState<any>(null);
-  const [saving, setSaving] = useState(false);
-  const [cfg, setCfg] = useState<Record<string, string>>({});
+  const [features, setFeatures] = useState<any[] | null>(null);
+  const [usage, setUsage] = useState<any>(null);
+  const [editing, setEditing] = useState<string | null>(null);
+  const [draft, setDraft] = useState<any>({});
+  const [savingFeature, setSavingFeature] = useState(false);
+  const [msg, setMsg] = useState('');
 
-  useEffect(() => {
-    apiGet<any>('/admin/ai/usage').then((r) => { setData(r); setCfg(r.config || {}); }).catch(() => {});
-  }, []);
+  function load() {
+    apiGet<any>('/admin/ai/features').then((r) => setFeatures(r.features)).catch(() => {});
+    apiGet<any>('/admin/ai/usage').then((r) => setUsage(r)).catch(() => {});
+  }
+  useEffect(() => { load(); }, []);
 
-  async function saveCfg() {
-    setSaving(true);
-    await apiPut('/admin/ai/config', cfg).catch(() => {});
-    setSaving(false);
+  function startEdit(f: any) {
+    setEditing(f.feature_key);
+    setDraft({
+      provider: f.provider, model: f.model, base_url: f.base_url,
+      api_key: f.has_key ? '••••••' : '',
+      monthly_budget: f.monthly_budget, enabled: f.enabled,
+    });
+  }
+  async function saveFeature(key: string) {
+    setSavingFeature(true);
+    try {
+      const payload: any = { ...draft, monthly_budget: Number(draft.monthly_budget) || 100000 };
+      await apiPut(`/admin/ai/features/${key}`, payload);
+      setMsg('Saved.');
+      setEditing(null);
+      load();
+    } catch (e: any) { setMsg('Save failed: ' + (e?.message || 'error')); }
+    setSavingFeature(false);
+    setTimeout(() => setMsg(''), 2500);
   }
 
-  if (!data) return <div className="spinner" />;
-  const s = data.summary;
-  const budget = Number(cfg.monthly_token_budget) || 1000000;
-  const pct = Math.min(100, Math.round((s.total_tokens / budget) * 100));
+  if (!features || !usage) return <div className="spinner" />;
+  const s = usage.summary;
 
   return (
     <div className="grid">
       <div className="card pad dash-hero" style={{ background: 'linear-gradient(120deg,#1a1a3a,#1e3a5e)' }}>
         <div>
           <span className="kicker">AI PLATFORM MONITORING</span>
-          <h2 style={{ color: '#fff', margin: '8px 0 6px' }}>🤖 AI LLM Console</h2>
-          <p style={{ color: '#b0c4de', margin: 0 }}>Monitor token consumption across all AI features — chatbot, quiz generation &amp; challenge evaluation. Configure your LLM endpoint.</p>
+          <h2 style={{ color: '#fff', margin: '8px 0 6px' }}>🤖 Multi-LLM Console</h2>
+          <p style={{ color: '#b0c4de', margin: 0 }}>Route each AI feature to a different provider — Gemini for quiz generation, Claude for TinkerBot, OpenAI for evaluation. Track per-feature token spend and budgets independently.</p>
         </div>
       </div>
 
@@ -837,71 +863,97 @@ function AiMonitor() {
         <div className="card kpi"><span className="kpi-ico" style={{ color: 'var(--yellow)' }}>📞</span><div><div className="kpi-n">{s.total_calls}</div><div className="muted" style={{ fontSize: 13 }}>AI Calls</div></div></div>
       </div>
 
-      <div className="dash-cols">
-        <Panel title="Monthly Budget Usage" icon="📊">
-          <div style={{ marginBottom: 8 }}>
-            <div className="row between" style={{ fontSize: 13, marginBottom: 6 }}>
-              <span>{s.total_tokens.toLocaleString()} / {Number(budget).toLocaleString()} tokens</span>
-              <b>{pct}%</b>
-            </div>
-            <div style={{ background: 'var(--border)', borderRadius: 8, height: 12 }}>
-              <div style={{ width: `${pct}%`, background: pct > 80 ? 'var(--pink)' : pct > 50 ? 'var(--yellow)' : 'var(--green)', height: '100%', borderRadius: 8, transition: 'width .3s' }} />
-            </div>
-          </div>
-          <h4 style={{ marginTop: 16, marginBottom: 8 }}>Usage by Feature</h4>
-          {data.byFeature.length === 0 && <div className="muted">No AI calls logged yet.</div>}
-          {data.byFeature.map((f: any) => (
-            <div key={f.feature} className="row between" style={{ padding: '6px 0', borderBottom: '1px solid var(--border)', fontSize: 13 }}>
-              <span style={{ textTransform: 'capitalize' }}>{f.feature.replace(/_/g, ' ')}</span>
-              <span><b>{f.tokens.toLocaleString()}</b> tokens · {f.calls} calls</span>
-            </div>
-          ))}
-        </Panel>
+      {msg && <div className="card pad" style={{ background: '#e8f5e9', color: '#1b5e20', fontSize: 14 }}>{msg}</div>}
 
-        <Panel title="LLM Configuration" icon="⚙️">
-          {[['provider','Provider (offline / openai / custom)'],['model','Model'],['base_url','Base URL'],['monthly_token_budget','Monthly Token Budget']].map(([k,l]) => (
-            <div key={k} className="field" style={{ marginBottom: 10 }}>
-              <label style={{ fontSize: 13 }}>{l}</label>
-              <input value={cfg[k] || ''} onChange={e => setCfg({ ...cfg, [k]: e.target.value })} />
-            </div>
-          ))}
-          <h4 style={{ marginTop: 16, marginBottom: 8 }}>Feature Toggles</h4>
-          {[['chatbot_enabled','Student Chatbot (TinkerBot)'],['quiz_gen_enabled','AI Quiz Generation'],['challenge_eval_enabled','Challenge Evaluation']].map(([k,l]) => (
-            <div key={k} className="row between" style={{ padding: '8px 0', borderBottom: '1px solid var(--border)' }}>
-              <span style={{ fontSize: 13 }}>{l}</span>
-              <button className={`btn sm ${cfg[k] === 'true' ? '' : 'ghost'}`}
-                onClick={() => setCfg({ ...cfg, [k]: cfg[k] === 'true' ? 'false' : 'true' })}>
-                {cfg[k] === 'true' ? '✓ Enabled' : 'Disabled'}
-              </button>
-            </div>
-          ))}
-          <button className="btn" style={{ marginTop: 14 }} disabled={saving} onClick={saveCfg}>{saving ? 'Saving…' : 'Save Configuration'}</button>
-        </Panel>
-      </div>
+      <Panel title="Per-Feature LLM Configuration" icon="🧩" sub="Each AI feature can use its own provider, model, API key, and monthly token budget. Changes apply immediately.">
+        <div style={{ overflowX: 'auto' }}>
+          <table>
+            <thead>
+              <tr>
+                <th>Feature</th><th>Provider</th><th>Model</th><th>Budget</th><th>Used (this month)</th><th>Status</th><th></th>
+              </tr>
+            </thead>
+            <tbody>
+              {features.map((f) => {
+                const pct = Math.min(100, Math.round((f.used_tokens / Math.max(1, f.monthly_budget)) * 100));
+                const isEditing = editing === f.feature_key;
+                return (
+                  <tr key={f.feature_key}>
+                    <td><b>{f.display_name}</b><br /><span className="muted" style={{ fontSize: 11 }}>{f.feature_key}</span></td>
+                    <td><span className="chip" style={{ background: f.provider === 'offline' ? '#eee' : '#e3f2fd' }}>{f.provider}</span></td>
+                    <td style={{ fontSize: 12, fontFamily: 'monospace' }}>{f.model}</td>
+                    <td>{Number(f.monthly_budget).toLocaleString()}</td>
+                    <td>
+                      <div style={{ fontSize: 12 }}>{Number(f.used_tokens).toLocaleString()} ({pct}%)</div>
+                      <div style={{ background: 'var(--border)', borderRadius: 4, height: 6, marginTop: 4 }}>
+                        <div style={{ width: `${pct}%`, background: pct > 80 ? 'var(--pink)' : pct > 50 ? 'var(--yellow)' : 'var(--green)', height: '100%', borderRadius: 4 }} />
+                      </div>
+                    </td>
+                    <td>{f.enabled ? <span style={{ color: 'var(--green)' }}>✓ Enabled</span> : <span className="muted">Disabled</span>}</td>
+                    <td><button className="btn sm ghost" onClick={() => startEdit(f)}>Edit</button></td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
 
-      <Panel title="Daily Token Usage (Last 30 Days)" icon="📈">
-        {data.daily.length === 0 ? (
-          <div className="muted">No usage data yet. AI calls will appear here once students use TinkerBot, quizzes or challenges.</div>
+        {editing && (() => {
+          const f = features.find((x) => x.feature_key === editing);
+          if (!f) return null;
+          return (
+            <div className="card pad" style={{ marginTop: 16, background: '#fafafa' }}>
+              <h3>Edit · {f.display_name}</h3>
+              <div className="grid2" style={{ gap: 10 }}>
+                <div className="field"><label>Provider</label>
+                  <select value={draft.provider} onChange={(e) => setDraft({ ...draft, provider: e.target.value })}>
+                    <option value="offline">offline (deterministic fallback)</option>
+                    <option value="openai">openai (OpenAI / Azure / Ollama / vLLM)</option>
+                    <option value="gemini">gemini (Google Generative Language)</option>
+                    <option value="claude">claude (Anthropic)</option>
+                    <option value="custom">custom (OpenAI-compatible)</option>
+                  </select>
+                </div>
+                <div className="field"><label>Model</label><input value={draft.model} onChange={(e) => setDraft({ ...draft, model: e.target.value })} /></div>
+                <div className="field" style={{ gridColumn: '1 / span 2' }}><label>Base URL</label><input value={draft.base_url} onChange={(e) => setDraft({ ...draft, base_url: e.target.value })} /></div>
+                <div className="field" style={{ gridColumn: '1 / span 2' }}>
+                  <label>API Key {f.has_key && <span className="muted" style={{ fontSize: 11 }}>(leave as ••••••• to keep current; clear to remove)</span>}</label>
+                  <input type="password" value={draft.api_key} onChange={(e) => setDraft({ ...draft, api_key: e.target.value })} placeholder="sk-..." />
+                </div>
+                <div className="field"><label>Monthly Budget (tokens)</label><input type="number" value={draft.monthly_budget} onChange={(e) => setDraft({ ...draft, monthly_budget: e.target.value })} /></div>
+                <div className="field"><label>Enabled</label>
+                  <button className={`btn sm ${draft.enabled ? '' : 'ghost'}`} onClick={() => setDraft({ ...draft, enabled: !draft.enabled })}>{draft.enabled ? '✓ Enabled' : 'Disabled'}</button>
+                </div>
+              </div>
+              <div className="row" style={{ gap: 8, marginTop: 12 }}>
+                <button className="btn" disabled={savingFeature} onClick={() => saveFeature(editing!)}>{savingFeature ? 'Saving…' : 'Save'}</button>
+                <button className="btn ghost" onClick={() => setEditing(null)}>Cancel</button>
+              </div>
+            </div>
+          );
+        })()}
+      </Panel>
+
+      <Panel title="Per-Feature Daily Usage (Last 14 Days)" icon="📈">
+        {features.every((f) => !f.daily.length) ? (
+          <div className="muted">No usage yet. Once students chat with TinkerBot, generate quizzes, or submit challenges, daily token usage will appear here per feature.</div>
         ) : (
-          <div style={{ overflowX: 'auto' }}>
-            <table>
-              <thead><tr><th>Date</th><th>Tokens Used</th><th>Bar</th></tr></thead>
-              <tbody>
-                {(() => { const max = Math.max(...data.daily.map((d: any) => d.tokens), 1);
-                  return data.daily.map((d: any) => (
-                    <tr key={d.day}>
-                      <td style={{ fontSize: 12 }}>{d.day}</td>
-                      <td><b>{d.tokens.toLocaleString()}</b></td>
-                      <td style={{ width: 200 }}>
-                        <div style={{ background: 'var(--border)', borderRadius: 4, height: 8 }}>
-                          <div style={{ width: `${(d.tokens / max) * 100}%`, background: 'var(--primary)', height: '100%', borderRadius: 4 }} />
-                        </div>
-                      </td>
-                    </tr>
-                  ));
-                })()}
-              </tbody>
-            </table>
+          <div className="grid" style={{ gap: 16 }}>
+            {features.map((f) => {
+              const max = Math.max(...f.daily.map((d: any) => d.tokens), 1);
+              return (
+                <div key={f.feature_key}>
+                  <h4 style={{ margin: '0 0 6px' }}>{f.display_name} <span className="muted" style={{ fontSize: 12, fontWeight: 'normal' }}>· {f.provider} / {f.model}</span></h4>
+                  {f.daily.length === 0 ? <div className="muted" style={{ fontSize: 13 }}>No calls yet</div> : (
+                    <div className="row" style={{ gap: 4, alignItems: 'flex-end', height: 60 }}>
+                      {f.daily.map((d: any) => (
+                        <div key={d.day} title={`${d.day}: ${d.tokens.toLocaleString()} tokens`} style={{ flex: 1, height: `${(d.tokens / max) * 100}%`, minHeight: 2, background: 'var(--primary)', borderRadius: 2 }} />
+                      ))}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
           </div>
         )}
       </Panel>
@@ -1014,3 +1066,412 @@ function AdminProfile() {
   );
 }
 
+
+// ============================================================
+// PHASE 2: Reports, Audit Log, IAM Matrix, Data Retention
+// ============================================================
+
+function downloadCsv(filename: string, rows: any[], columns: { key: string; label: string }[]) {
+  if (!rows.length) return;
+  const escape = (v: any) => {
+    const s = v == null ? '' : String(v);
+    return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+  };
+  const header = columns.map((c) => escape(c.label)).join(',');
+  const body = rows.map((r) => columns.map((c) => escape(r[c.key])).join(',')).join('\n');
+  const blob = new Blob([header + '\n' + body], { type: 'text/csv;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = filename; a.click();
+  URL.revokeObjectURL(url);
+}
+
+function Reports() {
+  const [tab, setTab] = useState<'students' | 'teachers' | 'ai'>('students');
+  const [grades, setGrades] = useState<any[]>([]);
+  const [gradeId, setGradeId] = useState<number | ''>('');
+  const [aiDays, setAiDays] = useState(30);
+  const [students, setStudents] = useState<any[] | null>(null);
+  const [teachers, setTeachers] = useState<any[] | null>(null);
+  const [ai, setAi] = useState<any[] | null>(null);
+
+  useEffect(() => { apiGet<any>('/admin/grades').then((r) => setGrades(r.grades)).catch(() => {}); }, []);
+
+  useEffect(() => {
+    if (tab === 'students') {
+      const q = gradeId ? `?grade_id=${gradeId}` : '';
+      apiGet<any>(`/admin/reports/students${q}`).then((r) => setStudents(r.rows)).catch(() => {});
+    } else if (tab === 'teachers') {
+      apiGet<any>('/admin/reports/teachers').then((r) => setTeachers(r.rows)).catch(() => {});
+    } else if (tab === 'ai') {
+      apiGet<any>(`/admin/reports/ai?days=${aiDays}`).then((r) => setAi(r.rows)).catch(() => {});
+    }
+  }, [tab, gradeId, aiDays]);
+
+  return (
+    <div className="grid">
+      <div className="card pad dash-hero" style={{ background: 'linear-gradient(120deg,#0f3a52,#1f6f8b)' }}>
+        <div>
+          <span className="kicker">REPORTING & ANALYTICS</span>
+          <h2 style={{ color: '#fff', margin: '8px 0 6px' }}>📈 Reports Center</h2>
+          <p style={{ color: '#cfe9f5', margin: 0 }}>Export student progress, teacher activity and AI consumption snapshots for stakeholder reviews.</p>
+        </div>
+      </div>
+
+      <div className="card pad">
+        <div className="row" style={{ gap: 8, marginBottom: 14 }}>
+          <button className={`btn sm ${tab === 'students' ? '' : 'ghost'}`} onClick={() => setTab('students')}>🎒 Students</button>
+          <button className={`btn sm ${tab === 'teachers' ? '' : 'ghost'}`} onClick={() => setTab('teachers')}>👩‍🏫 Teachers</button>
+          <button className={`btn sm ${tab === 'ai' ? '' : 'ghost'}`} onClick={() => setTab('ai')}>🤖 AI Usage</button>
+        </div>
+
+        {tab === 'students' && (
+          <>
+            <div className="row" style={{ gap: 10, marginBottom: 12 }}>
+              <select value={gradeId} onChange={(e) => setGradeId(e.target.value ? Number(e.target.value) : '')}>
+                <option value="">All classes</option>
+                {grades.map((g) => <option key={g.id} value={g.id}>{g.name}</option>)}
+              </select>
+              <button className="btn sm" disabled={!students?.length} onClick={() => downloadCsv('students_report.csv', students || [], [
+                { key: 'full_name', label: 'Name' }, { key: 'email', label: 'Email' }, { key: 'username', label: 'Username' },
+                { key: 'grade', label: 'Class' }, { key: 'chapters_completed', label: 'Chapters Completed' },
+                { key: 'avg_score', label: 'Avg Score %' }, { key: 'quiz_attempts', label: 'Quiz Attempts' },
+                { key: 'last_login', label: 'Last Login' }, { key: 'created_at', label: 'Joined' },
+              ])}>⬇ Export CSV</button>
+            </div>
+            {!students ? <div className="spinner" /> : (
+              <div style={{ overflowX: 'auto' }}>
+                <table>
+                  <thead><tr><th>Name</th><th>Class</th><th>Email</th><th>Chapters</th><th>Avg %</th><th>Attempts</th><th>Last Login</th></tr></thead>
+                  <tbody>
+                    {students.map((s) => (
+                      <tr key={s.id}>
+                        <td><b>{s.full_name}</b></td><td>{s.grade || '—'}</td><td style={{ fontSize: 12 }}>{s.email}</td>
+                        <td>{s.chapters_completed}</td><td>{s.avg_score}</td><td>{s.quiz_attempts}</td>
+                        <td style={{ fontSize: 12 }} className="muted">{s.last_login ? new Date(s.last_login).toLocaleDateString() : '—'}</td>
+                      </tr>
+                    ))}
+                    {students.length === 0 && <tr><td colSpan={7} className="muted" style={{ textAlign: 'center', padding: 20 }}>No students found.</td></tr>}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </>
+        )}
+
+        {tab === 'teachers' && (
+          <>
+            <div className="row" style={{ gap: 10, marginBottom: 12 }}>
+              <button className="btn sm" disabled={!teachers?.length} onClick={() => downloadCsv('teachers_report.csv', teachers || [], [
+                { key: 'full_name', label: 'Name' }, { key: 'email', label: 'Email' }, { key: 'username', label: 'Username' },
+                { key: 'class_assignments', label: 'Class Assignments' }, { key: 'lesson_plans', label: 'Lesson Plans' },
+                { key: 'quiz_gen_calls', label: 'AI Quiz Calls' }, { key: 'last_login', label: 'Last Login' },
+              ])}>⬇ Export CSV</button>
+            </div>
+            {!teachers ? <div className="spinner" /> : (
+              <div style={{ overflowX: 'auto' }}>
+                <table>
+                  <thead><tr><th>Name</th><th>Email</th><th>Assignments</th><th>Lesson Plans</th><th>AI Quiz Calls</th><th>Last Login</th></tr></thead>
+                  <tbody>
+                    {teachers.map((t) => (
+                      <tr key={t.id}>
+                        <td><b>{t.full_name}</b></td><td style={{ fontSize: 12 }}>{t.email}</td>
+                        <td>{t.class_assignments}</td><td>{t.lesson_plans}</td><td>{t.quiz_gen_calls}</td>
+                        <td style={{ fontSize: 12 }} className="muted">{t.last_login ? new Date(t.last_login).toLocaleDateString() : '—'}</td>
+                      </tr>
+                    ))}
+                    {teachers.length === 0 && <tr><td colSpan={6} className="muted" style={{ textAlign: 'center', padding: 20 }}>No teachers found.</td></tr>}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </>
+        )}
+
+        {tab === 'ai' && (
+          <>
+            <div className="row" style={{ gap: 10, marginBottom: 12 }}>
+              <select value={aiDays} onChange={(e) => setAiDays(Number(e.target.value))}>
+                <option value={7}>Last 7 days</option>
+                <option value={30}>Last 30 days</option>
+                <option value={90}>Last 90 days</option>
+                <option value={365}>Last 365 days</option>
+              </select>
+              <button className="btn sm" disabled={!ai?.length} onClick={() => downloadCsv(`ai_usage_${aiDays}d.csv`, ai || [], [
+                { key: 'feature', label: 'Feature' }, { key: 'model', label: 'Model' }, { key: 'calls', label: 'Calls' },
+                { key: 'prompt_tokens', label: 'Prompt Tokens' }, { key: 'completion_tokens', label: 'Completion Tokens' },
+                { key: 'total_tokens', label: 'Total Tokens' }, { key: 'last_call', label: 'Last Call' },
+              ])}>⬇ Export CSV</button>
+            </div>
+            {!ai ? <div className="spinner" /> : (
+              <div style={{ overflowX: 'auto' }}>
+                <table>
+                  <thead><tr><th>Feature</th><th>Model</th><th>Calls</th><th>Prompt</th><th>Completion</th><th>Total Tokens</th><th>Last Call</th></tr></thead>
+                  <tbody>
+                    {ai.map((r, i) => (
+                      <tr key={i}>
+                        <td><b>{r.feature}</b></td><td style={{ fontSize: 12, fontFamily: 'monospace' }}>{r.model}</td>
+                        <td>{r.calls}</td><td>{Number(r.prompt_tokens).toLocaleString()}</td>
+                        <td>{Number(r.completion_tokens).toLocaleString()}</td><td><b>{Number(r.total_tokens).toLocaleString()}</b></td>
+                        <td style={{ fontSize: 12 }} className="muted">{r.last_call ? new Date(r.last_call).toLocaleString() : '—'}</td>
+                      </tr>
+                    ))}
+                    {ai.length === 0 && <tr><td colSpan={7} className="muted" style={{ textAlign: 'center', padding: 20 }}>No AI usage in this period.</td></tr>}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function AuditLog() {
+  const [data, setData] = useState<any>(null);
+  const [filters, setFilters] = useState({ action: '', entity: '', since: '', until: '' });
+  const [offset, setOffset] = useState(0);
+  const limit = 50;
+
+  function load(o = 0) {
+    const p = new URLSearchParams();
+    p.set('limit', String(limit));
+    p.set('offset', String(o));
+    if (filters.action) p.set('action', filters.action);
+    if (filters.entity) p.set('entity', filters.entity);
+    if (filters.since) p.set('since', filters.since);
+    if (filters.until) p.set('until', filters.until);
+    apiGet<any>(`/admin/audit?${p.toString()}`).then((r) => { setData(r); setOffset(o); }).catch(() => {});
+  }
+  useEffect(() => { load(0); /* eslint-disable-next-line */ }, [filters]);
+
+  return (
+    <div className="grid">
+      <div className="card pad dash-hero" style={{ background: 'linear-gradient(120deg,#3a1a1a,#5e1e2e)' }}>
+        <div>
+          <span className="kicker">AUDIT & GOVERNANCE</span>
+          <h2 style={{ color: '#fff', margin: '8px 0 6px' }}>🛡️ Audit Log</h2>
+          <p style={{ color: '#f3cfd5', margin: 0 }}>Tamper-evident timeline of admin and system actions. Filter, inspect metadata and export for compliance reviews.</p>
+        </div>
+      </div>
+
+      <Panel title="Filters" icon="🔍">
+        <div className="grid2" style={{ gap: 10 }}>
+          <div className="field"><label>Action</label>
+            <select value={filters.action} onChange={(e) => setFilters({ ...filters, action: e.target.value })}>
+              <option value="">All</option>
+              {(data?.actions || []).map((a: string) => <option key={a} value={a}>{a}</option>)}
+            </select>
+          </div>
+          <div className="field"><label>Entity</label>
+            <select value={filters.entity} onChange={(e) => setFilters({ ...filters, entity: e.target.value })}>
+              <option value="">All</option>
+              {(data?.entities || []).map((e: string) => <option key={e} value={e}>{e}</option>)}
+            </select>
+          </div>
+          <div className="field"><label>From</label><input type="date" value={filters.since} onChange={(e) => setFilters({ ...filters, since: e.target.value })} /></div>
+          <div className="field"><label>To</label><input type="date" value={filters.until} onChange={(e) => setFilters({ ...filters, until: e.target.value })} /></div>
+        </div>
+        <div className="row" style={{ gap: 8, marginTop: 12 }}>
+          <button className="btn sm ghost" onClick={() => setFilters({ action: '', entity: '', since: '', until: '' })}>Clear filters</button>
+          <button className="btn sm" disabled={!data?.activities?.length} onClick={() => downloadCsv('audit_log.csv', (data?.activities || []).map((a: any) => ({
+            ...a, meta_json: a.meta ? JSON.stringify(a.meta) : '',
+          })), [
+            { key: 'created_at', label: 'Time' }, { key: 'actor', label: 'Actor' }, { key: 'actor_role', label: 'Role' },
+            { key: 'actor_email', label: 'Email' }, { key: 'action', label: 'Action' }, { key: 'entity', label: 'Entity' },
+            { key: 'entity_id', label: 'Entity ID' }, { key: 'meta_json', label: 'Metadata' },
+          ])}>⬇ Export CSV</button>
+        </div>
+      </Panel>
+
+      <Panel title={`Events (${data?.total ?? 0})`} icon="📜">
+        {!data ? <div className="spinner" /> : (
+          <>
+            <div style={{ overflowX: 'auto' }}>
+              <table>
+                <thead><tr><th>Time</th><th>Actor</th><th>Action</th><th>Entity</th><th>Metadata</th></tr></thead>
+                <tbody>
+                  {data.activities.map((a: any) => (
+                    <tr key={a.id}>
+                      <td style={{ fontSize: 12, whiteSpace: 'nowrap' }}>{new Date(a.created_at).toLocaleString()}</td>
+                      <td><b>{a.actor || 'System'}</b><br /><span className="muted" style={{ fontSize: 11 }}>{a.actor_role}</span></td>
+                      <td><span className="chip">{a.action}</span></td>
+                      <td style={{ fontSize: 12 }}>{a.entity}<br /><span className="muted" style={{ fontSize: 11 }}>{a.entity_id?.slice(0, 12)}</span></td>
+                      <td><pre style={{ fontSize: 11, margin: 0, maxWidth: 320, whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>{a.meta ? JSON.stringify(a.meta) : '—'}</pre></td>
+                    </tr>
+                  ))}
+                  {data.activities.length === 0 && <tr><td colSpan={5} className="muted" style={{ textAlign: 'center', padding: 20 }}>No events match these filters.</td></tr>}
+                </tbody>
+              </table>
+            </div>
+            {data.total > limit && (
+              <div className="row" style={{ gap: 8, marginTop: 12 }}>
+                <button className="btn ghost sm" disabled={offset === 0} onClick={() => load(Math.max(0, offset - limit))}>← Prev</button>
+                <span className="muted" style={{ fontSize: 13 }}>Page {Math.floor(offset / limit) + 1} / {Math.max(1, Math.ceil(data.total / limit))}</span>
+                <button className="btn ghost sm" disabled={offset + limit >= data.total} onClick={() => load(offset + limit)}>Next →</button>
+              </div>
+            )}
+          </>
+        )}
+      </Panel>
+    </div>
+  );
+}
+
+function IamMatrix() {
+  const [perms, setPerms] = useState<any[] | null>(null);
+  const [saving, setSaving] = useState<string | null>(null);
+
+  function load() { apiGet<any>('/admin/iam/permissions').then((r) => setPerms(r.permissions)).catch(() => {}); }
+  useEffect(() => { load(); }, []);
+
+  async function toggle(role: string, resource: string, key: string, value: boolean) {
+    const id = `${role}:${resource}:${key}`;
+    setSaving(id);
+    try {
+      await apiPut(`/admin/iam/permissions/${role}/${resource}`, { [key]: value });
+      setPerms((prev) => prev?.map((p) => p.role === role && p.resource === resource ? { ...p, [key]: value } : p) || null);
+    } catch (e: any) { alert(e?.message || 'Update failed'); }
+    setSaving(null);
+  }
+
+  if (!perms) return <div className="spinner" />;
+  const roles = Array.from(new Set(perms.map((p) => p.role)));
+  const resources = Array.from(new Set(perms.map((p) => p.resource))).sort();
+
+  return (
+    <div className="grid">
+      <div className="card pad dash-hero" style={{ background: 'linear-gradient(120deg,#1a3a2f,#1e6f5e)' }}>
+        <div>
+          <span className="kicker">IDENTITY & ACCESS</span>
+          <h2 style={{ color: '#fff', margin: '8px 0 6px' }}>🔐 Access Control Matrix</h2>
+          <p style={{ color: '#cfeede', margin: 0 }}>Define what each role can View, Create, Edit and Delete across every resource. Changes are written immediately and audited.</p>
+        </div>
+      </div>
+
+      {roles.map((role) => (
+        <Panel key={role} title={role.charAt(0).toUpperCase() + role.slice(1)} icon={role === 'admin' ? '👑' : role === 'teacher' ? '👩‍🏫' : '🎒'}>
+          <div style={{ overflowX: 'auto' }}>
+            <table>
+              <thead><tr><th>Resource</th><th style={{ textAlign: 'center' }}>View</th><th style={{ textAlign: 'center' }}>Create</th><th style={{ textAlign: 'center' }}>Edit</th><th style={{ textAlign: 'center' }}>Delete</th></tr></thead>
+              <tbody>
+                {resources.map((res) => {
+                  const p = perms.find((x) => x.role === role && x.resource === res);
+                  if (!p) return null;
+                  return (
+                    <tr key={res}>
+                      <td><b>{res.replace(/_/g, ' ')}</b></td>
+                      {(['can_view', 'can_create', 'can_edit', 'can_delete'] as const).map((k) => {
+                        const id = `${role}:${res}:${k}`;
+                        return (
+                          <td key={k} style={{ textAlign: 'center' }}>
+                            <button
+                              className={`btn sm ${p[k] ? '' : 'ghost'}`}
+                              disabled={saving === id}
+                              onClick={() => toggle(role, res, k, !p[k])}
+                              style={{ minWidth: 56, padding: '4px 10px' }}
+                            >{p[k] ? '✓' : '×'}</button>
+                          </td>
+                        );
+                      })}
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </Panel>
+      ))}
+      <div className="card pad" style={{ background: '#fff8e1', fontSize: 13 }}>
+        ⚠️ <b>Note:</b> The matrix is recorded for governance and reporting. Route-level enforcement currently relies on role checks (admin / teacher / student) — granular enforcement against this matrix is on the roadmap.
+      </div>
+    </div>
+  );
+}
+
+function Retention() {
+  const [data, setData] = useState<any>(null);
+  const [draft, setDraft] = useState<Record<string, number>>({});
+  const [saving, setSaving] = useState(false);
+  const [purging, setPurging] = useState(false);
+  const [msg, setMsg] = useState('');
+
+  function load() {
+    apiGet<any>('/admin/retention').then((r) => {
+      setData(r);
+      const d: Record<string, number> = {};
+      for (const [k, v] of Object.entries<any>(r.retention || {})) d[k] = Number(v.value) || 180;
+      setDraft(d);
+    }).catch(() => {});
+  }
+  useEffect(() => { load(); }, []);
+
+  async function save() {
+    setSaving(true);
+    try { await apiPut('/admin/retention', draft); setMsg('Saved retention policy.'); load(); }
+    catch (e: any) { setMsg('Save failed: ' + (e?.message || 'error')); }
+    setSaving(false); setTimeout(() => setMsg(''), 2500);
+  }
+  async function purge() {
+    if (!confirm('Permanently delete records older than the configured retention windows? This cannot be undone.')) return;
+    setPurging(true);
+    try {
+      const r: any = await apiPost('/admin/retention/purge', {});
+      setMsg(`Purged: ${r.purged.activity} activity, ${r.purged.ai_usage} AI usage, ${r.purged.chat} chat, ${r.purged.quiz} quiz records.`);
+      load();
+    } catch (e: any) { setMsg('Purge failed: ' + (e?.message || 'error')); }
+    setPurging(false); setTimeout(() => setMsg(''), 5000);
+  }
+
+  if (!data) return <div className="spinner" />;
+  const fields: { key: string; label: string; total: number; entity: string }[] = [
+    { key: 'retention_activity_days', label: 'Activity Log', total: Number(data.stats.activity_total), entity: 'activity_log' },
+    { key: 'retention_ai_usage_days', label: 'AI Usage', total: Number(data.stats.ai_usage_total), entity: 'ai_usage' },
+    { key: 'retention_chat_days', label: 'Chat Messages', total: Number(data.stats.chat_total), entity: 'chat_messages' },
+    { key: 'retention_quiz_days', label: 'Quiz Attempts', total: Number(data.stats.quiz_total), entity: 'quiz_attempts' },
+  ];
+
+  return (
+    <div className="grid">
+      <div className="card pad dash-hero" style={{ background: 'linear-gradient(120deg,#3a2a1a,#6f4f1e)' }}>
+        <div>
+          <span className="kicker">DATA GOVERNANCE</span>
+          <h2 style={{ color: '#fff', margin: '8px 0 6px' }}>🗄️ Log Retention & Purging</h2>
+          <p style={{ color: '#f3e0c5', margin: 0 }}>Decide how long activity, AI usage, chat and quiz records are kept. Purging is one-click and audited.</p>
+        </div>
+      </div>
+
+      {msg && <div className="card pad" style={{ background: '#e8f5e9', color: '#1b5e20', fontSize: 14 }}>{msg}</div>}
+
+      <Panel title="Retention Windows" icon="⏳" sub="Records older than the configured number of days will be removed when you run a purge.">
+        <div style={{ overflowX: 'auto' }}>
+          <table>
+            <thead><tr><th>Dataset</th><th>Total Records</th><th>Retention (days)</th><th>Last Updated</th></tr></thead>
+            <tbody>
+              {fields.map((f) => (
+                <tr key={f.key}>
+                  <td><b>{f.label}</b><br /><span className="muted" style={{ fontSize: 11 }}>{f.entity}</span></td>
+                  <td>{f.total.toLocaleString()}</td>
+                  <td>
+                    <input
+                      type="number" min={7} max={3650} step={1}
+                      value={draft[f.key] ?? 180}
+                      onChange={(e) => setDraft({ ...draft, [f.key]: Number(e.target.value) })}
+                      style={{ width: 100 }}
+                    />
+                  </td>
+                  <td className="muted" style={{ fontSize: 12 }}>{data.retention[f.key]?.updated_at ? new Date(data.retention[f.key].updated_at).toLocaleDateString() : '—'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        <div className="row" style={{ gap: 8, marginTop: 14 }}>
+          <button className="btn" disabled={saving} onClick={save}>{saving ? 'Saving…' : 'Save Policy'}</button>
+          <button className="btn ghost" disabled={purging} onClick={purge} style={{ borderColor: 'var(--pink)', color: 'var(--pink)' }}>{purging ? 'Purging…' : '🗑 Run Purge Now'}</button>
+        </div>
+      </Panel>
+    </div>
+  );
+}

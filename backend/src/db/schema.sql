@@ -295,3 +295,79 @@ CREATE INDEX IF NOT EXISTS idx_lessons_teacher ON lesson_plans(teacher_id);
 DROP TRIGGER IF EXISTS trg_lessons_updated ON lesson_plans;
 CREATE TRIGGER trg_lessons_updated BEFORE UPDATE ON lesson_plans
   FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+
+-- ============================================================
+-- ROUND 9 PHASE 2: Multi-LLM, IAM matrix, log retention
+-- ============================================================
+
+-- Per-feature LLM configuration (Item 11)
+CREATE TABLE IF NOT EXISTS ai_features (
+  feature_key    TEXT PRIMARY KEY,
+  display_name   TEXT NOT NULL,
+  provider       TEXT NOT NULL DEFAULT 'offline',
+  model          TEXT NOT NULL DEFAULT 'gpt-4o-mini',
+  base_url       TEXT NOT NULL DEFAULT 'https://api.openai.com/v1',
+  api_key        TEXT,
+  monthly_budget INT NOT NULL DEFAULT 1000000,
+  enabled        BOOLEAN NOT NULL DEFAULT TRUE,
+  updated_at     TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+INSERT INTO ai_features (feature_key, display_name, provider, model, base_url, monthly_budget, enabled) VALUES
+  ('chatbot',        'Student Chatbot (TinkerBot)', 'offline', 'gpt-4o-mini',           'https://api.openai.com/v1',                  500000, TRUE),
+  ('quiz_gen',       'AI Quiz Generation',          'offline', 'gemini-1.5-flash',      'https://generativelanguage.googleapis.com/v1beta/openai', 300000, TRUE),
+  ('challenge_eval', 'Challenge Evaluation',        'offline', 'claude-3-5-sonnet-latest','https://api.anthropic.com/v1',             200000, TRUE)
+ON CONFLICT (feature_key) DO NOTHING;
+
+-- IAM permissions matrix (Item 17)
+CREATE TABLE IF NOT EXISTS iam_permissions (
+  role        TEXT NOT NULL,
+  resource    TEXT NOT NULL,
+  can_view    BOOLEAN NOT NULL DEFAULT FALSE,
+  can_create  BOOLEAN NOT NULL DEFAULT FALSE,
+  can_edit    BOOLEAN NOT NULL DEFAULT FALSE,
+  can_delete  BOOLEAN NOT NULL DEFAULT FALSE,
+  updated_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (role, resource)
+);
+
+INSERT INTO iam_permissions (role, resource, can_view, can_create, can_edit, can_delete) VALUES
+  ('admin','users',         TRUE,TRUE,TRUE,TRUE),
+  ('admin','courses',       TRUE,TRUE,TRUE,TRUE),
+  ('admin','assignments',   TRUE,TRUE,TRUE,TRUE),
+  ('admin','schools',       TRUE,TRUE,TRUE,TRUE),
+  ('admin','finance',       TRUE,TRUE,TRUE,TRUE),
+  ('admin','live_classes',  TRUE,TRUE,TRUE,TRUE),
+  ('admin','reports',       TRUE,TRUE,TRUE,TRUE),
+  ('admin','ai_platform',   TRUE,TRUE,TRUE,TRUE),
+  ('admin','audit_logs',    TRUE,FALSE,FALSE,TRUE),
+  ('admin','iam',           TRUE,TRUE,TRUE,TRUE),
+  ('teacher','users',       FALSE,FALSE,FALSE,FALSE),
+  ('teacher','courses',     TRUE,FALSE,TRUE,FALSE),
+  ('teacher','assignments', TRUE,TRUE,TRUE,FALSE),
+  ('teacher','schools',     FALSE,FALSE,FALSE,FALSE),
+  ('teacher','finance',     FALSE,FALSE,FALSE,FALSE),
+  ('teacher','live_classes',TRUE,TRUE,TRUE,FALSE),
+  ('teacher','reports',     TRUE,FALSE,FALSE,FALSE),
+  ('teacher','ai_platform', FALSE,FALSE,FALSE,FALSE),
+  ('teacher','audit_logs',  FALSE,FALSE,FALSE,FALSE),
+  ('teacher','iam',         FALSE,FALSE,FALSE,FALSE),
+  ('student','users',       FALSE,FALSE,FALSE,FALSE),
+  ('student','courses',     TRUE,FALSE,FALSE,FALSE),
+  ('student','assignments', TRUE,FALSE,FALSE,FALSE),
+  ('student','schools',     FALSE,FALSE,FALSE,FALSE),
+  ('student','finance',     FALSE,FALSE,FALSE,FALSE),
+  ('student','live_classes',TRUE,FALSE,FALSE,FALSE),
+  ('student','reports',     FALSE,FALSE,FALSE,FALSE),
+  ('student','ai_platform', FALSE,FALSE,FALSE,FALSE),
+  ('student','audit_logs',  FALSE,FALSE,FALSE,FALSE),
+  ('student','iam',         FALSE,FALSE,FALSE,FALSE)
+ON CONFLICT (role, resource) DO NOTHING;
+
+-- Log retention policy keys (Item 18)
+INSERT INTO ai_config (key, value) VALUES
+  ('retention_activity_days','180'),
+  ('retention_ai_usage_days','365'),
+  ('retention_chat_days','90'),
+  ('retention_quiz_days','730')
+ON CONFLICT (key) DO NOTHING;

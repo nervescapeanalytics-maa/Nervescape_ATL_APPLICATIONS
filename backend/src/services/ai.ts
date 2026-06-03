@@ -2,18 +2,62 @@ import { config } from '../config';
 import { pool } from '../db/pool';
 
 /**
- * AI service abstraction.
- * - When AI_PROVIDER != 'offline' and an API key is set, calls an OpenAI-compatible
- *   chat/completions endpoint (works with OpenAI, Azure OpenAI, Ollama, LM Studio, vLLM...).
- * - Otherwise falls back to a deterministic offline engine so the LMS is fully
- *   functional without external dependencies.
+ * AI service abstraction with PER-FEATURE LLM routing.
+ * Each feature (chatbot, quiz_gen, challenge_eval) can use a different provider/model
+ * and has its own monthly token budget. Configuration lives in the `ai_features`
+ * DB table and is managed from the Admin AI Platform UI.
+ *
+ * Supported providers:
+ *  - 'offline'  → deterministic fallback (no network)
+ *  - 'openai'   → OpenAI-compatible (also works for Azure, Ollama, vLLM, LM Studio, custom)
+ *  - 'gemini'   → Google Gemini OpenAI-compatible endpoint
+ *  - 'claude' / 'anthropic' → Anthropic /v1/messages
+ *  - 'custom'   → OpenAI-compatible endpoint at custom base URL
  */
 
 export interface ChatMessage { role: 'system' | 'user' | 'assistant'; content: string; }
-
-export const aiEnabled = config.ai.provider !== 'offline' && !!config.ai.apiKey;
-
 export interface LLMResult { content: string; usage: { prompt_tokens: number; completion_tokens: number; total_tokens: number } }
+
+export interface FeatureConfig {
+  feature_key: string;
+  display_name: string;
+  provider: string;
+  model: string;
+  base_url: string;
+  api_key: string | null;
+  monthly_budget: number;
+  enabled: boolean;
+}
+
+let featureCache: { at: number; map: Map<string, FeatureConfig> } | null = null;
+const CACHE_TTL_MS = 30_000;
+export function invalidateFeatureCache() { featureCache = null; }
+
+async function loadFeatureConfig(key: string): Promise<FeatureConfig> {
+  const now = Date.now();
+  if (!featureCache || now - featureCache.at > CACHE_TTL_MS) {
+    const map = new Map<string, FeatureConfig>();
+    try {
+      const { rows } = await pool.query<FeatureConfig>(
+        `SELECT feature_key, display_name, provider, model, base_url, api_key, monthly_budget, enabled FROM ai_features`
+      );
+      for (const r of rows) map.set(r.feature_key, r);
+    } catch { /* table may not exist before migrate on first boot */ }
+    featureCache = { at: now, map };
+  }
+  return featureCache.map.get(key) || {
+    feature_key: key,
+    display_name: key,
+    provider: (config.ai.provider || 'offline').toLowerCase(),
+    model: config.ai.model,
+    base_url: config.ai.baseUrl,
+    api_key: config.ai.apiKey || null,
+    monthly_budget: 1_000_000,
+    enabled: true,
+  };
+}
+
+const zeroUsage = { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 };
 
 export async function logAiUsage(userId: string | null, feature: string, usage: LLMResult['usage'], model: string) {
   try {
@@ -25,18 +69,58 @@ export async function logAiUsage(userId: string | null, feature: string, usage: 
   } catch { /* non-critical */ }
 }
 
-async function callLLM(messages: ChatMessage[], opts: { temperature?: number; maxTokens?: number } = {}): Promise<LLMResult> {
-  const zeroUsage = { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 };
-  if (!aiEnabled) return { content: offlineReply(messages), usage: zeroUsage };
+async function tokensThisMonth(feature: string): Promise<number> {
   try {
-    const res = await fetch(`${config.ai.baseUrl}/chat/completions`, {
+    const { rows } = await pool.query<{ tot: number }>(
+      `SELECT COALESCE(SUM(total_tokens),0)::int AS tot FROM ai_usage
+        WHERE feature = $1 AND created_at >= date_trunc('month', now())`,
+      [feature]
+    );
+    return rows[0]?.tot || 0;
+  } catch { return 0; }
+}
+
+async function callProvider(cfg: FeatureConfig, messages: ChatMessage[], opts: { temperature?: number; maxTokens?: number }): Promise<LLMResult> {
+  const provider = cfg.provider.toLowerCase();
+  if (provider === 'offline' || !cfg.api_key) {
+    return { content: offlineReply(messages), usage: zeroUsage };
+  }
+  try {
+    if (provider === 'claude' || provider === 'anthropic') {
+      const sys = messages.find((m) => m.role === 'system')?.content;
+      const turns = messages.filter((m) => m.role !== 'system').map((m) => ({ role: m.role, content: m.content }));
+      const res = await fetch(`${cfg.base_url.replace(/\/$/, '')}/messages`, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'x-api-key': cfg.api_key,
+          'anthropic-version': '2023-06-01',
+        },
+        body: JSON.stringify({
+          model: cfg.model,
+          system: sys,
+          messages: turns,
+          max_tokens: opts.maxTokens ?? 700,
+          temperature: opts.temperature ?? 0.6,
+        }),
+      });
+      if (!res.ok) throw new Error(`Anthropic HTTP ${res.status}`);
+      const data: any = await res.json();
+      const content = data.content?.map((b: any) => b.text).join('').trim() || offlineReply(messages);
+      const usage = data.usage ? {
+        prompt_tokens: data.usage.input_tokens || 0,
+        completion_tokens: data.usage.output_tokens || 0,
+        total_tokens: (data.usage.input_tokens || 0) + (data.usage.output_tokens || 0),
+      } : zeroUsage;
+      return { content, usage };
+    }
+
+    // openai / gemini / custom — all OpenAI-compatible chat/completions
+    const res = await fetch(`${cfg.base_url.replace(/\/$/, '')}/chat/completions`, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${config.ai.apiKey}`,
-      },
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${cfg.api_key}` },
       body: JSON.stringify({
-        model: config.ai.model,
+        model: cfg.model,
         messages,
         temperature: opts.temperature ?? 0.6,
         max_tokens: opts.maxTokens ?? 700,
@@ -52,10 +136,25 @@ async function callLLM(messages: ChatMessage[], opts: { temperature?: number; ma
     } : zeroUsage;
     return { content, usage };
   } catch (e) {
-    console.warn('[ai] provider call failed, using offline fallback:', (e as Error).message);
+    console.warn(`[ai/${cfg.feature_key}] ${cfg.provider} call failed, using offline fallback:`, (e as Error).message);
     return { content: offlineReply(messages), usage: zeroUsage };
   }
 }
+
+async function callFeature(featureKey: string, messages: ChatMessage[], opts: { temperature?: number; maxTokens?: number }): Promise<{ result: LLMResult; cfg: FeatureConfig }> {
+  const cfg = await loadFeatureConfig(featureKey);
+  if (!cfg.enabled) return { result: { content: offlineReply(messages), usage: zeroUsage }, cfg };
+  const used = await tokensThisMonth(featureKey);
+  if (used >= cfg.monthly_budget) {
+    console.warn(`[ai/${featureKey}] monthly budget exceeded (${used}/${cfg.monthly_budget})`);
+    return { result: { content: offlineReply(messages), usage: zeroUsage }, cfg };
+  }
+  const result = await callProvider(cfg, messages, opts);
+  return { result, cfg };
+}
+
+// Back-compat flag (used by some routes/seed code)
+export const aiEnabled = config.ai.provider !== 'offline' && !!config.ai.apiKey;
 
 // ---------------- Offline deterministic engine ----------------
 function offlineReply(messages: ChatMessage[]): string {
@@ -81,45 +180,42 @@ function offlineReply(messages: ChatMessage[]): string {
 }
 
 // ---------------- Public helpers ----------------
-export async function chatbotAnswer(studentName: string, chapterTitle: string | null, history: ChatMessage[], question: string): Promise<{ answer: string; usage: LLMResult['usage'] }> {
+export async function chatbotAnswer(studentName: string, chapterTitle: string | null, history: ChatMessage[], question: string): Promise<{ answer: string; usage: LLMResult['usage']; model: string }> {
   const system: ChatMessage = {
     role: 'system',
     content:
-      `You are "TinkerBot", a friendly, encouraging AI tutor for school students (classes 6-8) in an ATL Tinkering LMS. ` +
+      `You are "TinkerBot", a friendly, encouraging AI tutor for school students (classes 6-12) in an ATL Tinkering LMS. ` +
       `Explain in simple layman terms with real-life examples, encourage curiosity, creativity and logical thinking. ` +
       (chapterTitle ? `The student is studying the chapter "${chapterTitle}". ` : '') +
       `Keep answers concise, positive and age-appropriate. Student name: ${studentName}.`,
   };
   const messages = [system, ...history.slice(-6), { role: 'user', content: question } as ChatMessage];
-  const result = await callLLM(messages, { temperature: 0.6, maxTokens: 500 });
-  return { answer: result.content, usage: result.usage };
+  const { result, cfg } = await callFeature('chatbot', messages, { temperature: 0.6, maxTokens: 500 });
+  return { answer: result.content, usage: result.usage, model: cfg.model };
 }
 
 export interface GenQuestion { qtype: string; prompt: string; options?: string[]; answer: string; explanation: string; difficulty: string; }
 
-export async function generateQuestions(chapterTitle: string, summary: string, count: number, qtype: string, userId?: string): Promise<{ questions: GenQuestion[]; usage: LLMResult['usage'] }> {
-  const zeroUsage = { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 };
-  if (aiEnabled) {
-    const sys: ChatMessage = { role: 'system', content: 'You generate JSON quiz questions for school students. Respond ONLY with a JSON array.' };
-    const user: ChatMessage = {
-      role: 'user',
-      content: `Create ${count} ${qtype} questions for the chapter "${chapterTitle}". Context: ${summary}. ` +
-        `Each item: {"qtype":"${qtype}","prompt":"","options":["","","",""],"answer":"","explanation":"","difficulty":"beginner|intermediate|advanced"}. ` +
-        `For non-mcq types omit options or use empty array.`,
-    };
+export async function generateQuestions(chapterTitle: string, summary: string, count: number, qtype: string, userId?: string): Promise<{ questions: GenQuestion[]; usage: LLMResult['usage']; model: string }> {
+  const sys: ChatMessage = { role: 'system', content: 'You generate JSON quiz questions for school students. Respond ONLY with a JSON array.' };
+  const user: ChatMessage = {
+    role: 'user',
+    content: `Create ${count} ${qtype} questions for the chapter "${chapterTitle}". Context: ${summary}. ` +
+      `Each item: {"qtype":"${qtype}","prompt":"","options":["","","",""],"answer":"","explanation":"","difficulty":"beginner|intermediate|advanced"}. ` +
+      `For non-mcq types omit options or use empty array.`,
+  };
+  const { result, cfg } = await callFeature('quiz_gen', [sys, user], { temperature: 0.7, maxTokens: 1200 });
+  if (cfg.provider !== 'offline' && cfg.api_key) {
     try {
-      const result = await callLLM([sys, user], { temperature: 0.7, maxTokens: 1200 });
       const json = result.content.slice(result.content.indexOf('['), result.content.lastIndexOf(']') + 1);
       const parsed = JSON.parse(json);
       if (Array.isArray(parsed) && parsed.length) {
-        if (userId) await logAiUsage(userId, 'quiz_gen', result.usage, config.ai.model);
-        return { questions: parsed.slice(0, count), usage: result.usage };
+        if (userId) await logAiUsage(userId, 'quiz_gen', result.usage, cfg.model);
+        return { questions: parsed.slice(0, count), usage: result.usage, model: cfg.model };
       }
-    } catch (e) {
-      console.warn('[ai] generateQuestions parse failed, using template fallback');
-    }
+    } catch { console.warn('[ai] generateQuestions parse failed, using template fallback'); }
   }
-  return { questions: offlineQuestions(chapterTitle, count, qtype), usage: zeroUsage };
+  return { questions: offlineQuestions(chapterTitle, count, qtype), usage: zeroUsage, model: cfg.model };
 }
 
 function offlineQuestions(title: string, count: number, qtype: string): GenQuestion[] {
@@ -150,16 +246,15 @@ function offlineQuestions(title: string, count: number, qtype: string): GenQuest
   return out;
 }
 
-export async function evaluateChallenge(prompt: string, response: string, userId?: string): Promise<{ feedback: string; score: number; usage: LLMResult['usage'] }> {
-  const zeroUsage = { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 };
-  if (aiEnabled) {
-    const sys: ChatMessage = { role: 'system', content: 'You are a kind teacher grading a student challenge from 0-10. Respond as JSON {"score":number,"feedback":"..."}.' };
-    const user: ChatMessage = { role: 'user', content: `Challenge: ${prompt}\nStudent response: ${response}\nGive encouraging, constructive feedback.` };
+export async function evaluateChallenge(prompt: string, response: string, userId?: string): Promise<{ feedback: string; score: number; usage: LLMResult['usage']; model: string }> {
+  const sys: ChatMessage = { role: 'system', content: 'You are a kind teacher grading a student challenge from 0-10. Respond as JSON {"score":number,"feedback":"..."}.' };
+  const user: ChatMessage = { role: 'user', content: `Challenge: ${prompt}\nStudent response: ${response}\nGive encouraging, constructive feedback.` };
+  const { result, cfg } = await callFeature('challenge_eval', [sys, user], { temperature: 0.4, maxTokens: 300 });
+  if (cfg.provider !== 'offline' && cfg.api_key) {
     try {
-      const result = await callLLM([sys, user], { temperature: 0.4, maxTokens: 300 });
       const json = JSON.parse(result.content.slice(result.content.indexOf('{'), result.content.lastIndexOf('}') + 1));
-      if (userId) await logAiUsage(userId, 'challenge_eval', result.usage, config.ai.model);
-      return { feedback: json.feedback || 'Good effort!', score: Math.max(0, Math.min(10, json.score ?? 6)), usage: result.usage };
+      if (userId) await logAiUsage(userId, 'challenge_eval', result.usage, cfg.model);
+      return { feedback: json.feedback || 'Good effort!', score: Math.max(0, Math.min(10, json.score ?? 6)), usage: result.usage, model: cfg.model };
     } catch { /* fall through */ }
   }
   const len = response.trim().split(/\s+/).filter(Boolean).length;
@@ -168,5 +263,6 @@ export async function evaluateChallenge(prompt: string, response: string, userId
     feedback: `Nice attempt! You wrote ${len} words. To improve, explain your reasoning step by step and add a real example. Keep tinkering — every iteration makes you sharper!`,
     score,
     usage: zeroUsage,
+    model: cfg.model,
   };
 }

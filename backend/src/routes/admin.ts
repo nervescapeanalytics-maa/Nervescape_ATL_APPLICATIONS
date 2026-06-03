@@ -5,6 +5,7 @@ import { one, query } from '../db/pool';
 import { authenticate, authorize } from '../middleware/auth';
 import { asyncH, httpError } from '../middleware/error';
 import { config } from '../config';
+import { invalidateFeatureCache } from '../services/ai';
 
 const router = Router();
 router.use(authenticate, authorize('admin'));
@@ -333,6 +334,283 @@ router.put('/ai/config', asyncH(async (req, res) => {
 router.get('/grades', asyncH(async (_req, res) => {
   const { rows } = await query(`SELECT id, name, number, level_label FROM grades WHERE is_active ORDER BY number`);
   res.json({ grades: rows });
+}));
+
+// ============================================================
+// PHASE 2: per-feature LLM config, IAM matrix, retention, reports
+// ============================================================
+
+// Per-feature LLM configuration (Item 11)
+router.get('/ai/features', asyncH(async (_req, res) => {
+  const { rows: features } = await query(
+    `SELECT feature_key, display_name, provider, model, base_url,
+            CASE WHEN api_key IS NULL OR api_key='' THEN '' ELSE '••••••' END AS api_key_mask,
+            (api_key IS NOT NULL AND api_key<>'') AS has_key,
+            monthly_budget, enabled, updated_at
+       FROM ai_features ORDER BY feature_key`
+  );
+  // per-feature current month token usage
+  const { rows: usage } = await query(
+    `SELECT feature, COALESCE(SUM(total_tokens),0)::int AS tokens, COUNT(*)::int AS calls
+       FROM ai_usage WHERE created_at >= date_trunc('month', now())
+       GROUP BY feature`
+  );
+  const usageMap: Record<string, { tokens: number; calls: number }> = {};
+  for (const u of usage) usageMap[u.feature] = { tokens: u.tokens, calls: u.calls };
+  // per-feature daily usage (last 14 days) for sparkline
+  const { rows: daily } = await query(
+    `SELECT feature, date_trunc('day', created_at)::date AS day, COALESCE(SUM(total_tokens),0)::int AS tokens
+       FROM ai_usage WHERE created_at >= now() - interval '14 days'
+       GROUP BY 1,2 ORDER BY 2`
+  );
+  const dailyMap: Record<string, { day: string; tokens: number }[]> = {};
+  for (const d of daily) {
+    const day = (d.day instanceof Date ? d.day.toISOString().slice(0, 10) : String(d.day));
+    (dailyMap[d.feature] ||= []).push({ day, tokens: d.tokens });
+  }
+  const enriched = features.map((f) => ({
+    ...f,
+    used_tokens: usageMap[f.feature_key]?.tokens || 0,
+    calls_this_month: usageMap[f.feature_key]?.calls || 0,
+    daily: dailyMap[f.feature_key] || [],
+  }));
+  res.json({ features: enriched });
+}));
+
+const featureUpdateSchema = z.object({
+  display_name: z.string().min(1).optional(),
+  provider: z.enum(['offline', 'openai', 'gemini', 'claude', 'anthropic', 'custom']).optional(),
+  model: z.string().min(1).optional(),
+  base_url: z.string().min(1).optional(),
+  api_key: z.string().optional(),  // empty string = clear; literal "••••••" = keep
+  monthly_budget: z.number().int().positive().optional(),
+  enabled: z.boolean().optional(),
+});
+router.put('/ai/features/:key', asyncH(async (req, res) => {
+  const key = req.params.key;
+  const d = featureUpdateSchema.parse(req.body);
+  const fields: string[] = [];
+  const values: any[] = [];
+  let i = 1;
+  for (const [k, v] of Object.entries(d)) {
+    if (k === 'api_key' && v === '••••••') continue; // preserve existing
+    fields.push(`${k} = $${i++}`);
+    values.push(v);
+  }
+  if (!fields.length) return res.json({ ok: true });
+  fields.push(`updated_at = now()`);
+  values.push(key);
+  await query(`UPDATE ai_features SET ${fields.join(', ')} WHERE feature_key = $${i}`, values);
+  invalidateFeatureCache();
+  await query(
+    `INSERT INTO activity_log (actor_id, action, entity, entity_id, meta) VALUES ($1,$2,$3,$4,$5)`,
+    [req.user!.id, 'ai_feature_update', 'ai_features', key, JSON.stringify({ ...d, api_key: d.api_key ? '***' : undefined })]
+  );
+  res.json({ ok: true });
+}));
+
+// ---- IAM permissions matrix (Item 17) ----
+router.get('/iam/permissions', asyncH(async (_req, res) => {
+  const { rows } = await query(
+    `SELECT role, resource, can_view, can_create, can_edit, can_delete, updated_at
+       FROM iam_permissions ORDER BY role, resource`
+  );
+  res.json({ permissions: rows });
+}));
+
+const iamUpdateSchema = z.object({
+  can_view: z.boolean().optional(),
+  can_create: z.boolean().optional(),
+  can_edit: z.boolean().optional(),
+  can_delete: z.boolean().optional(),
+});
+router.put('/iam/permissions/:role/:resource', asyncH(async (req, res) => {
+  const { role, resource } = req.params;
+  const d = iamUpdateSchema.parse(req.body);
+  if (role === 'admin') {
+    // Guardrail: do not let admin lock themselves out by removing view rights from admin-managed resources
+    if (d.can_view === false) throw httpError(400, 'Cannot disable admin view permission');
+  }
+  const fields: string[] = [];
+  const values: any[] = [];
+  let i = 1;
+  for (const [k, v] of Object.entries(d)) {
+    fields.push(`${k} = $${i++}`);
+    values.push(v);
+  }
+  if (!fields.length) return res.json({ ok: true });
+  fields.push(`updated_at = now()`);
+  values.push(role, resource);
+  await query(
+    `UPDATE iam_permissions SET ${fields.join(', ')} WHERE role = $${i} AND resource = $${i + 1}`,
+    values
+  );
+  await query(
+    `INSERT INTO activity_log (actor_id, action, entity, entity_id, meta) VALUES ($1,$2,$3,$4,$5)`,
+    [req.user!.id, 'iam_update', 'iam_permissions', `${role}:${resource}`, JSON.stringify(d)]
+  );
+  res.json({ ok: true });
+}));
+
+// ---- Log retention policy (Item 18) ----
+const RETENTION_KEYS = ['retention_activity_days', 'retention_ai_usage_days', 'retention_chat_days', 'retention_quiz_days'] as const;
+
+router.get('/retention', asyncH(async (_req, res) => {
+  const { rows } = await query(
+    `SELECT key, value, updated_at FROM ai_config WHERE key = ANY($1)`,
+    [RETENTION_KEYS]
+  );
+  const map: Record<string, { value: string; updated_at: any }> = {};
+  for (const r of rows) map[r.key] = { value: r.value, updated_at: r.updated_at };
+  // Counts of records older than each retention threshold (so admin can preview)
+  const stats = await one<any>(`SELECT
+    (SELECT count(*) FROM activity_log) AS activity_total,
+    (SELECT count(*) FROM ai_usage)     AS ai_usage_total,
+    (SELECT count(*) FROM chat_messages) AS chat_total,
+    (SELECT count(*) FROM quiz_attempts) AS quiz_total`);
+  res.json({ retention: map, stats });
+}));
+
+router.put('/retention', asyncH(async (req, res) => {
+  const updates = req.body as Record<string, number | string>;
+  for (const [key, value] of Object.entries(updates)) {
+    if (!RETENTION_KEYS.includes(key as any)) continue;
+    const days = Math.max(7, Math.min(3650, Number(value) || 180));
+    await query(
+      `INSERT INTO ai_config (key, value, updated_at) VALUES ($1,$2,now())
+       ON CONFLICT (key) DO UPDATE SET value=$2, updated_at=now()`,
+      [key, String(days)]
+    );
+  }
+  await query(
+    `INSERT INTO activity_log (actor_id, action, entity, entity_id, meta) VALUES ($1,$2,$3,$4,$5)`,
+    [req.user!.id, 'retention_update', 'ai_config', 'retention', JSON.stringify(updates)]
+  );
+  res.json({ ok: true });
+}));
+
+router.post('/retention/purge', asyncH(async (req, res) => {
+  const { rows: cfg } = await query(
+    `SELECT key, value FROM ai_config WHERE key = ANY($1)`,
+    [RETENTION_KEYS]
+  );
+  const days: Record<string, number> = {};
+  for (const r of cfg) days[r.key] = Math.max(7, Number(r.value) || 180);
+  const purged = {
+    activity: 0,
+    ai_usage: 0,
+    chat: 0,
+    quiz: 0,
+  };
+  if (days['retention_activity_days']) {
+    const r = await query(`DELETE FROM activity_log WHERE created_at < now() - ($1 || ' days')::interval`, [days['retention_activity_days']]);
+    purged.activity = r.rowCount || 0;
+  }
+  if (days['retention_ai_usage_days']) {
+    const r = await query(`DELETE FROM ai_usage WHERE created_at < now() - ($1 || ' days')::interval`, [days['retention_ai_usage_days']]);
+    purged.ai_usage = r.rowCount || 0;
+  }
+  if (days['retention_chat_days']) {
+    const r = await query(`DELETE FROM chat_messages WHERE created_at < now() - ($1 || ' days')::interval`, [days['retention_chat_days']]);
+    purged.chat = r.rowCount || 0;
+  }
+  if (days['retention_quiz_days']) {
+    const r = await query(`DELETE FROM quiz_attempts WHERE created_at < now() - ($1 || ' days')::interval`, [days['retention_quiz_days']]);
+    purged.quiz = r.rowCount || 0;
+  }
+  await query(
+    `INSERT INTO activity_log (actor_id, action, entity, entity_id, meta) VALUES ($1,$2,$3,$4,$5)`,
+    [req.user!.id, 'retention_purge', 'maintenance', 'manual', JSON.stringify(purged)]
+  );
+  res.json({ ok: true, purged });
+}));
+
+// ---- Reports management (Item 16) ----
+router.get('/reports/students', asyncH(async (req, res) => {
+  const gradeId = req.query.grade_id ? Number(req.query.grade_id) : null;
+  const { rows } = await query(
+    `SELECT u.id, u.full_name, u.email, u.username, g.name AS grade,
+            COALESCE(p.completed,0)::int AS chapters_completed,
+            COALESCE(p.avg_score,0)::int AS avg_score,
+            COALESCE(qa.attempts,0)::int AS quiz_attempts,
+            u.last_login, u.created_at
+       FROM users u
+       LEFT JOIN grades g ON g.id = u.grade_id
+       LEFT JOIN (SELECT student_id, count(*) FILTER (WHERE status='completed') AS completed,
+                         AVG(best_score)::int AS avg_score
+                  FROM progress GROUP BY student_id) p ON p.student_id = u.id
+       LEFT JOIN (SELECT student_id, count(*) AS attempts FROM quiz_attempts GROUP BY student_id) qa ON qa.student_id = u.id
+       WHERE u.role = 'student' AND ($1::int IS NULL OR u.grade_id = $1)
+       ORDER BY u.full_name`,
+    [gradeId]
+  );
+  res.json({ rows });
+}));
+
+router.get('/reports/teachers', asyncH(async (_req, res) => {
+  const { rows } = await query(
+    `SELECT u.id, u.full_name, u.email, u.username,
+            COALESCE(ta.assignments,0)::int AS class_assignments,
+            COALESCE(lp.lesson_plans,0)::int AS lesson_plans,
+            COALESCE(qg.quiz_gen_calls,0)::int AS quiz_gen_calls,
+            u.last_login, u.created_at
+       FROM users u
+       LEFT JOIN (SELECT teacher_id, count(*) AS assignments FROM teacher_assignments GROUP BY teacher_id) ta ON ta.teacher_id = u.id
+       LEFT JOIN (SELECT teacher_id, count(*) AS lesson_plans FROM lesson_plans GROUP BY teacher_id) lp ON lp.teacher_id = u.id
+       LEFT JOIN (SELECT user_id, count(*) AS quiz_gen_calls FROM ai_usage WHERE feature='quiz_gen' GROUP BY user_id) qg ON qg.user_id = u.id
+       WHERE u.role = 'teacher'
+       ORDER BY u.full_name`
+  );
+  res.json({ rows });
+}));
+
+router.get('/reports/ai', asyncH(async (req, res) => {
+  const days = Math.min(365, Math.max(1, Number(req.query.days) || 30));
+  const { rows } = await query(
+    `SELECT feature, model, COUNT(*)::int AS calls,
+            COALESCE(SUM(prompt_tokens),0)::int AS prompt_tokens,
+            COALESCE(SUM(completion_tokens),0)::int AS completion_tokens,
+            COALESCE(SUM(total_tokens),0)::int AS total_tokens,
+            MAX(created_at) AS last_call
+       FROM ai_usage WHERE created_at >= now() - ($1 || ' days')::interval
+       GROUP BY feature, model ORDER BY total_tokens DESC`,
+    [days]
+  );
+  res.json({ rows, days });
+}));
+
+// ---- Audit log (Item 15) — extended with filters & meta ----
+router.get('/audit', asyncH(async (req, res) => {
+  const limit = Math.min(Number(req.query.limit) || 100, 500);
+  const offset = Number(req.query.offset) || 0;
+  const action = (req.query.action as string) || '';
+  const entity = (req.query.entity as string) || '';
+  const actorId = (req.query.actor_id as string) || '';
+  const since = (req.query.since as string) || ''; // ISO date
+  const until = (req.query.until as string) || '';
+  const where: string[] = [];
+  const args: any[] = [];
+  let i = 1;
+  if (action) { where.push(`a.action = $${i++}`); args.push(action); }
+  if (entity) { where.push(`a.entity = $${i++}`); args.push(entity); }
+  if (actorId) { where.push(`a.actor_id = $${i++}`); args.push(actorId); }
+  if (since) { where.push(`a.created_at >= $${i++}`); args.push(since); }
+  if (until) { where.push(`a.created_at <= $${i++}`); args.push(until); }
+  const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
+  const { rows } = await query(
+    `SELECT a.id, a.action, a.entity, a.entity_id, a.meta, a.created_at,
+            u.full_name AS actor, u.role AS actor_role, u.email AS actor_email
+       FROM activity_log a
+       LEFT JOIN users u ON u.id = a.actor_id
+       ${whereSql}
+       ORDER BY a.created_at DESC LIMIT $${i} OFFSET $${i + 1}`,
+    [...args, limit, offset]
+  );
+  const total = await one<any>(`SELECT count(*)::int AS n FROM activity_log a ${whereSql}`, args);
+  // facets for filter dropdowns
+  const { rows: actions } = await query(`SELECT DISTINCT action FROM activity_log ORDER BY action LIMIT 100`);
+  const { rows: entities } = await query(`SELECT DISTINCT entity FROM activity_log WHERE entity IS NOT NULL ORDER BY entity LIMIT 100`);
+  res.json({ activities: rows, total: total?.n ?? 0, actions: actions.map((a) => a.action), entities: entities.map((e) => e.entity) });
 }));
 
 export default router;
