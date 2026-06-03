@@ -59,12 +59,12 @@ const CURRICULUM = [
 
 // Live, auto-advancing hero slides
 const SLIDES = [
-  { tag: 'Robotics', t: 'Line-follower & obstacle-avoider bots', d: 'Program autonomous machines that sense, decide and move on their own.', img: '1485827404703-89b55fcc595e', g: 'linear-gradient(135deg,rgba(76,5,25,0.82),rgba(45,18,90,0.92))' },
-  { tag: 'Electronics', t: 'Breadboarding & live circuits', d: 'Master voltage, current and components by building real, working circuits.', img: '1597852074816-d933c7d2b988', g: 'linear-gradient(135deg,rgba(8,47,73,0.82),rgba(6,78,59,0.92))' },
-  { tag: 'Embedded', t: 'Sensors, Arduino & microcontrollers', d: 'Give your projects a brain — read the world and react in real time.', img: '1553406830-ef2513450d76', g: 'linear-gradient(135deg,rgba(67,20,7,0.82),rgba(124,45,18,0.92))' },
-  { tag: 'Fabrication', t: '3D modelling & 3D printing', d: 'Turn ideas into printable objects with Tinkercad & CollabCAD.', img: '1635070041078-e363dbe005cb', g: 'linear-gradient(135deg,rgba(46,16,101,0.82),rgba(30,27,75,0.92))' },
-  { tag: 'AIoT', t: 'IoT & AIoT integration', d: 'Connect devices to the cloud and add edge intelligence to everything.', img: '1518770660439-4636190af475', g: 'linear-gradient(135deg,rgba(8,47,73,0.82),rgba(23,37,84,0.92))' },
-  { tag: 'AI / ML', t: 'AI/ML & computer vision starters', d: 'Teach machines to learn, classify and see with industry-grade tooling.', img: '1677442136019-21780ecad995', g: 'linear-gradient(135deg,rgba(80,7,36,0.82),rgba(59,7,100,0.92))' },
+  { tag: 'Robotics', t: 'Robots & Autonomous Bots', d: 'Build line-followers, obstacle-avoiders and mobile robots that sense, decide and move on their own.', img: '1535378917042-10a22c95931a', g: 'linear-gradient(135deg,rgba(15,23,42,0.78),rgba(76,5,25,0.88))' },
+  { tag: 'Embedded', t: 'Arduino & Microcontrollers', d: 'Give your projects a brain — program Arduino, ESP32 and microcontrollers to read the world in real time.', img: '1553406830-ef2513450d76', g: 'linear-gradient(135deg,rgba(15,23,42,0.78),rgba(67,20,7,0.88))' },
+  { tag: 'Entrepreneurship', t: 'Tinkerpreneur Projects', d: 'Turn your ideas into real ventures — pitch, prototype and launch student-led innovation.', img: '1556761175-5973dc0f32e7', g: 'linear-gradient(135deg,rgba(15,23,42,0.78),rgba(8,47,73,0.88))' },
+  { tag: 'AI / ML', t: 'AI & Machine Learning', d: 'Teach machines to learn, classify and see — train models with industry-grade tools.', img: '1677442136019-21780ecad995', g: 'linear-gradient(135deg,rgba(15,23,42,0.78),rgba(59,7,100,0.88))' },
+  { tag: 'Fabrication', t: '3D Modelling & 3D Printing', d: 'Design parts in Tinkercad & CollabCAD, then print and assemble real working objects.', img: '1635070041078-e363dbe005cb', g: 'linear-gradient(135deg,rgba(15,23,42,0.78),rgba(46,16,101,0.88))' },
+  { tag: 'Electronics', t: 'Breadboarding & Live Circuits', d: 'Master voltage, current and components by building real, working circuits hands-on.', img: '1597852074816-d933c7d2b988', g: 'linear-gradient(135deg,rgba(15,23,42,0.78),rgba(6,78,59,0.88))' },
 ];
 
 function HeroSlides() {

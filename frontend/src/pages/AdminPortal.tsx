@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { apiGet, apiPost, apiPut, apiDel } from '../api';
 import Layout from '../components/Layout';
+import { useAuth } from '../auth';
 
 export default function AdminPortal() {
   const [tab, setTab] = useState('overview');
@@ -10,6 +11,10 @@ export default function AdminPortal() {
       subtitle="Govern schools, users, courses & operations across the Nervescape network"
       active={tab}
       onTab={setTab}
+      menu={[
+        { key: 'profile', label: 'My Profile', icon: '👤', onClick: () => setTab('profile') },
+        { key: 'settings', label: 'Settings', icon: '⚙️', onClick: () => setTab('settings') },
+      ]}
       tabs={[
         { key: 'overview', label: 'Control Center', icon: '🏠', group: 'Overview' },
         { key: 'activity', label: 'Activity Feed', icon: '🕒', group: 'Overview' },
@@ -22,7 +27,6 @@ export default function AdminPortal() {
         { key: 'live', label: 'Live Classes', icon: '📡', group: 'Operations' },
         { key: 'finance', label: 'Finance', icon: '💰', group: 'Operations' },
         { key: 'ai', label: 'AI Platform', icon: '🤖', group: 'System' },
-        { key: 'settings', label: 'Settings', icon: '⚙️', group: 'System' },
       ]}
     >
       {tab === 'overview' && <Overview go={setTab} />}
@@ -37,6 +41,7 @@ export default function AdminPortal() {
       {tab === 'finance' && <Finance />}
       {tab === 'ai' && <AiMonitor />}
       {tab === 'settings' && <Settings />}
+      {tab === 'profile' && <AdminProfile />}
     </Layout>
   );
 }
@@ -81,7 +86,6 @@ const MODULES: { i: string; t: string; d: string; tab: string }[] = [
   { i: '🔬', t: 'ATL Activities', d: 'Tinkering schedule & events', tab: '' },
   { i: '📡', t: 'Live Classes', d: 'Schedule & monitor live sessions', tab: '' },
   { i: '💰', t: 'Finance', d: 'Subscriptions, invoices & revenue', tab: '' },
-  { i: '⚙️', t: 'Settings', d: 'Platform configuration', tab: '' },
 ];
 
 function Overview({ go }: { go: (t: string) => void }) {
@@ -647,39 +651,114 @@ function Schools() {
 }
 
 function LiveClasses() {
-  const MOCK = [
-    { id: 1, title: 'Intro to Robotics — Class 6A', teacher: 'Ms. Priya', grade: 'Class 6', scheduled: '2025-07-15 10:00', status: 'scheduled' },
-    { id: 2, title: 'IoT Basics Workshop', teacher: 'Mr. Rajan', grade: 'Class 7', scheduled: '2025-07-16 14:00', status: 'scheduled' },
-    { id: 3, title: 'AI & Sensors Demo', teacher: 'Ms. Kavitha', grade: 'Class 8', scheduled: '2025-07-10 09:00', status: 'completed' },
+  const DEMO: any[] = [
+    { id: 1, title: 'Intro to Robotics — Live demo', teacher: 'Ms. Priya Sharma', grade: 'Class 6', subject: 'Robotics', scheduled: '2026-06-10T10:00', duration: 60, recurrence: 'one-off', platform: 'YouTube Live', link: 'https://youtube.com/live/demo-robotics-class6', status: 'scheduled' },
+    { id: 2, title: 'Arduino Bootcamp (Weekly)', teacher: 'Mr. Rajan Verma', grade: 'Class 7', subject: 'Embedded Systems', scheduled: '2026-06-12T14:00', duration: 90, recurrence: 'weekly', platform: 'MS Teams', link: 'https://teams.microsoft.com/l/meetup-join/demo-arduino', status: 'scheduled' },
+    { id: 3, title: 'AI & Computer Vision Demo', teacher: 'Ms. Kavitha R', grade: 'Class 8', subject: 'AI / ML', scheduled: '2026-06-04T09:00', duration: 60, recurrence: 'one-off', platform: 'YouTube Live', link: 'https://youtube.com/live/demo-ai-class8', status: 'scheduled' },
+    { id: 4, title: '3D Modelling Workshop', teacher: 'Mr. Arjun Singh', grade: 'Class 6', subject: 'Fabrication', scheduled: '2026-06-15T11:00', duration: 75, recurrence: 'monthly', platform: 'MS Teams', link: 'https://teams.microsoft.com/l/meetup-join/demo-3d', status: 'scheduled' },
   ];
+  const STORE_KEY = 'admin-live-classes';
+  const [rows, setRows] = useState<any[]>(() => {
+    try { const v = localStorage.getItem(STORE_KEY); if (v) return JSON.parse(v); } catch {}
+    return DEMO;
+  });
+  const [show, setShow] = useState(false);
+  const [editing, setEditing] = useState<any>(null);
+  const empty = { title: '', teacher: '', grade: 'Class 6', subject: 'Robotics', scheduled: '', duration: 60, recurrence: 'one-off', platform: 'YouTube Live', link: '', status: 'scheduled' };
+  const [form, setForm] = useState<any>(empty);
+
+  function persist(next: any[]) { setRows(next); try { localStorage.setItem(STORE_KEY, JSON.stringify(next)); } catch {} }
+  function openAdd() { setEditing(null); setForm(empty); setShow(true); }
+  function openEdit(r: any) { setEditing(r); setForm({ ...r }); setShow(true); }
+  function save() {
+    if (!form.title || !form.teacher || !form.scheduled || !form.link) { alert('Title, Teacher, Date/Time and Meeting link are required'); return; }
+    if (editing) persist(rows.map(r => r.id === editing.id ? { ...form, id: editing.id } : r));
+    else persist([...rows, { ...form, id: Date.now() }]);
+    setShow(false);
+  }
+  function del(id: number) { if (confirm('Delete this live class?')) persist(rows.filter(r => r.id !== id)); }
+
   return (
     <div className="grid">
       <div className="card pad dash-hero" style={{ background: 'linear-gradient(120deg,#1a2a3a,#2a3a5e)' }}>
         <div>
           <span className="kicker">LIVE SESSIONS</span>
           <h2 style={{ color: '#fff', margin: '8px 0 6px' }}>Live Class Scheduler 📡</h2>
-          <p style={{ color: '#b0c4de', margin: 0 }}>Schedule and monitor live classes, record attendance and track engagement across all grades.</p>
+          <p style={{ color: '#b0c4de', margin: 0 }}>Schedule one-off or recurring live classes across grades and subjects. Teachers and students see them automatically.</p>
         </div>
       </div>
+
       <div className="card pad">
         <div className="row between" style={{ marginBottom: 12 }}>
-          <h3 style={{ margin: 0 }}>Upcoming Sessions</h3>
-          <button className="btn" disabled>+ Schedule Class</button>
+          <h3 style={{ margin: 0 }}>Scheduled Sessions</h3>
+          <button className="btn" onClick={openAdd}>+ Schedule Class</button>
         </div>
         <table>
-          <thead><tr><th>Title</th><th>Teacher</th><th>Class</th><th>Scheduled</th><th>Status</th></tr></thead>
+          <thead><tr><th>Title</th><th>Subject</th><th>Class</th><th>Teacher</th><th>When</th><th>Recurs</th><th>Platform</th><th>Link</th><th></th></tr></thead>
           <tbody>
-            {MOCK.map((c) => (
+            {rows.map((c) => (
               <tr key={c.id}>
-                <td>{c.title}</td><td>{c.teacher}</td><td>{c.grade}</td>
-                <td>{c.scheduled}</td>
-                <td><span className="tag" style={{ color: c.status === 'completed' ? 'var(--green)' : 'var(--primary)' }}>{c.status}</span></td>
+                <td><b>{c.title}</b></td>
+                <td>{c.subject}</td>
+                <td>{c.grade}</td>
+                <td>{c.teacher}</td>
+                <td style={{ fontSize: 12 }}>{new Date(c.scheduled).toLocaleString()} <span className="muted">· {c.duration}m</span></td>
+                <td><span className="tag">{c.recurrence}</span></td>
+                <td>{c.platform}</td>
+                <td><a href={c.link} target="_blank" rel="noreferrer" style={{ fontSize: 12 }}>Join ↗</a></td>
+                <td className="row" style={{ gap: 6 }}>
+                  <button className="btn ghost sm" onClick={() => openEdit(c)}>Edit</button>
+                  <button className="btn danger sm" onClick={() => del(c.id)}>Del</button>
+                </td>
               </tr>
             ))}
+            {rows.length === 0 && <tr><td colSpan={9} className="muted">No live classes scheduled. Click "+ Schedule Class" to add one.</td></tr>}
           </tbody>
         </table>
-        <div className="muted" style={{ marginTop: 12, fontSize: 13 }}>Full scheduling integration coming in next release. Connect a calendar API or video platform.</div>
       </div>
+
+      {show && (
+        <div className="modal-bg" onClick={() => setShow(false)}>
+          <div className="card pad modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 560 }}>
+            <h3 style={{ margin: '0 0 14px' }}>{editing ? 'Edit Live Class' : 'Schedule a Live Class'}</h3>
+            <div className="field"><label>Title*</label><input value={form.title} onChange={e => setForm({ ...form, title: e.target.value })} placeholder="e.g. Intro to Arduino — Weekly" /></div>
+            <div className="row" style={{ gap: 10 }}>
+              <div className="field" style={{ flex: 1 }}><label>Teacher*</label><input value={form.teacher} onChange={e => setForm({ ...form, teacher: e.target.value })} placeholder="Teacher name" /></div>
+              <div className="field" style={{ flex: 1 }}><label>Class</label>
+                <select value={form.grade} onChange={e => setForm({ ...form, grade: e.target.value })}>
+                  {['Class 6', 'Class 7', 'Class 8', 'Class 9', 'Class 10', 'Class 11', 'Class 12', 'All Classes'].map(g => <option key={g}>{g}</option>)}
+                </select>
+              </div>
+            </div>
+            <div className="row" style={{ gap: 10 }}>
+              <div className="field" style={{ flex: 1 }}><label>Subject</label>
+                <select value={form.subject} onChange={e => setForm({ ...form, subject: e.target.value })}>
+                  {['Robotics', 'Embedded Systems', 'Electronics', 'AI / ML', 'Fabrication', 'IoT & AIoT', 'Entrepreneurship', 'Innovation Challenge', 'General'].map(s => <option key={s}>{s}</option>)}
+                </select>
+              </div>
+              <div className="field" style={{ flex: 1 }}><label>Recurrence</label>
+                <select value={form.recurrence} onChange={e => setForm({ ...form, recurrence: e.target.value })}>
+                  {['one-off', 'daily', 'weekly', 'bi-weekly', 'monthly'].map(r => <option key={r}>{r}</option>)}
+                </select>
+              </div>
+            </div>
+            <div className="row" style={{ gap: 10 }}>
+              <div className="field" style={{ flex: 2 }}><label>Date & Time*</label><input type="datetime-local" value={form.scheduled} onChange={e => setForm({ ...form, scheduled: e.target.value })} /></div>
+              <div className="field" style={{ flex: 1 }}><label>Duration (min)</label><input type="number" value={form.duration} onChange={e => setForm({ ...form, duration: Number(e.target.value) })} /></div>
+            </div>
+            <div className="field"><label>Platform</label>
+              <select value={form.platform} onChange={e => setForm({ ...form, platform: e.target.value })}>
+                {['YouTube Live', 'MS Teams', 'Google Meet', 'Zoom', 'Other'].map(p => <option key={p}>{p}</option>)}
+              </select>
+            </div>
+            <div className="field"><label>Meeting / Stream Link*</label><input value={form.link} onChange={e => setForm({ ...form, link: e.target.value })} placeholder="https://teams.microsoft.com/... or https://youtube.com/live/..." /></div>
+            <div className="row between" style={{ marginTop: 12 }}>
+              <button className="btn ghost" onClick={() => setShow(false)}>Cancel</button>
+              <button className="btn" onClick={save}>{editing ? 'Save Changes' : 'Schedule Class'}</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -837,7 +916,7 @@ function Settings() {
       <div className="card pad">
         <h3 style={{ margin: '0 0 16px' }}>Platform Settings</h3>
         <div className="field"><label>Platform Name</label><input defaultValue="Nervescape Analytics" /></div>
-        <div className="field"><label>Support Email</label><input defaultValue="support@nervescape.io" /></div>
+        <div className="field"><label>Support Email</label><input defaultValue="support@nervescape.com" /></div>
         <div className="field"><label>Default Student Password</label><input type="password" defaultValue="Student@123" /></div>
         <div className="field"><label>Default Teacher Password</label><input type="password" defaultValue="Teacher@123" /></div>
         <div className="field">
@@ -854,6 +933,82 @@ function Settings() {
             <input type="checkbox" defaultChecked={def === 'true'} />
           </div>
         ))}
+      </div>
+    </div>
+  );
+}
+
+function AdminProfile() {
+  const { user } = useAuth();
+  const initials = (user?.full_name || 'A').split(' ').map(s => s[0]).slice(0, 2).join('').toUpperCase();
+  const [cur, setCur] = useState('');
+  const [nw, setNw] = useState('');
+  const [cf, setCf] = useState('');
+  const [pwMsg, setPwMsg] = useState<{ k: 'ok' | 'err'; t: string } | null>(null);
+  const [pwBusy, setPwBusy] = useState(false);
+
+  async function changePwd() {
+    setPwMsg(null);
+    if (!cur || !nw) return setPwMsg({ k: 'err', t: 'Please enter both passwords' });
+    if (nw.length < 6) return setPwMsg({ k: 'err', t: 'New password must be at least 6 characters' });
+    if (nw !== cf) return setPwMsg({ k: 'err', t: 'Passwords do not match' });
+    setPwBusy(true);
+    try {
+      await apiPost('/auth/change-password', { currentPassword: cur, newPassword: nw });
+      setPwMsg({ k: 'ok', t: 'Password updated successfully.' });
+      setCur(''); setNw(''); setCf('');
+    } catch (e: any) { setPwMsg({ k: 'err', t: e.message || 'Failed to change password' }); }
+    finally { setPwBusy(false); }
+  }
+
+  return (
+    <div className="grid">
+      <div className="profile-banner">
+        <div className="profile-avatar">{initials}</div>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <h2 style={{ margin: 0, color: '#fff' }}>{user?.full_name || 'Administrator'}</h2>
+          <p style={{ margin: '4px 0 0', color: 'rgba(255,255,255,0.85)' }}>{user?.email} · Super Admin</p>
+        </div>
+        <span className="profile-readonly" style={{ background: 'rgba(255,255,255,0.18)' }}>👑 Admin</span>
+      </div>
+
+      <div className="card pad">
+        <h3 style={{ margin: '0 0 14px', fontSize: 16 }}>👤 Account Details</h3>
+        <div className="info-grid">
+          {[['Full Name', user?.full_name], ['Email', user?.email], ['Role', 'Super Administrator'],
+            ['User ID', user?.id], ['Access Level', 'Full platform control'], ['Last Login', new Date().toLocaleString()],
+          ].map(([l, v]) => (
+            <div key={l} className="info-cell"><span className="info-label">{l}</span><span className="info-value">{v || '—'}</span></div>
+          ))}
+        </div>
+      </div>
+
+      <div className="card pad">
+        <h3 style={{ margin: '0 0 6px', fontSize: 16 }}>🔐 Change Password</h3>
+        <p className="muted" style={{ fontSize: 13, marginTop: 0 }}>Choose a strong password (min 6 characters) to keep your admin account secure.</p>
+        {pwMsg && <div className="card pad" style={{ borderColor: pwMsg.k === 'ok' ? 'var(--green)' : 'var(--red)', fontSize: 13, marginBottom: 12 }}>{pwMsg.t}</div>}
+        <div className="grid" style={{ gap: 10, maxWidth: 420 }}>
+          <div className="field"><label>Current password</label><input type="password" value={cur} onChange={e => setCur(e.target.value)} /></div>
+          <div className="field"><label>New password</label><input type="password" value={nw} onChange={e => setNw(e.target.value)} /></div>
+          <div className="field"><label>Confirm new password</label><input type="password" value={cf} onChange={e => setCf(e.target.value)} /></div>
+          <button className="btn" disabled={pwBusy} onClick={changePwd} style={{ alignSelf: 'flex-start' }}>{pwBusy ? 'Updating…' : 'Update Password'}</button>
+        </div>
+      </div>
+
+      <div className="card pad">
+        <h3 style={{ margin: '0 0 6px', fontSize: 16 }}>⚙️ Quick Settings</h3>
+        <p className="muted" style={{ fontSize: 13, marginTop: 0 }}>Personal preferences for this admin account.</p>
+        <div className="info-grid">
+          {[
+            ['Two-Factor Auth', 'Disabled (configure in Settings)'],
+            ['Email Notifications', 'Enabled'],
+            ['Theme', 'Light (system default)'],
+            ['Session Timeout', '12 hours'],
+          ].map(([l, v]) => (
+            <div key={l} className="info-cell"><span className="info-label">{l}</span><span className="info-value">{v}</span></div>
+          ))}
+        </div>
+        <p className="muted" style={{ fontSize: 12, marginTop: 12 }}>Open the <b>Settings</b> menu (top-right ▾) for full platform configuration.</p>
       </div>
     </div>
   );

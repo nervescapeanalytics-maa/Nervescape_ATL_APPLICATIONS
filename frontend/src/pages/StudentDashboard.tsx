@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { apiGet } from '../api';
+import { apiGet, apiPost } from '../api';
 import { useAuth } from '../auth';
 import Layout from '../components/Layout';
 import Chatbot from '../components/Chatbot';
@@ -677,6 +677,49 @@ function MyProfile() {
         ['Email', p.email], ['Username', p.username], ['Class', p.grade_name],
         ['Member since', fmtDate(p.created_at)],
       ]} />
+
+      <ChangePasswordCard />
+    </div>
+  );
+}
+
+function ChangePasswordCard() {
+  const [cur, setCur] = useState('');
+  const [nw, setNw] = useState('');
+  const [cf, setCf] = useState('');
+  const [msg, setMsg] = useState<{ k: 'ok' | 'err'; t: string } | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  async function submit() {
+    setMsg(null);
+    if (!cur || !nw) return setMsg({ k: 'err', t: 'Please enter both passwords' });
+    if (nw.length < 6) return setMsg({ k: 'err', t: 'New password must be at least 6 characters' });
+    if (nw !== cf) return setMsg({ k: 'err', t: 'New password and confirmation do not match' });
+    setBusy(true);
+    try {
+      await apiPost('/auth/change-password', { currentPassword: cur, newPassword: nw });
+      setMsg({ k: 'ok', t: 'Password updated successfully.' });
+      setCur(''); setNw(''); setCf('');
+    } catch (e: any) {
+      setMsg({ k: 'err', t: e.message || 'Failed to change password' });
+    } finally { setBusy(false); }
+  }
+
+  return (
+    <div className="card pad">
+      <h3 style={{ margin: '0 0 6px', fontSize: 16 }}>🔐 Change Password</h3>
+      <p className="muted" style={{ fontSize: 13, marginTop: 0 }}>For your security, choose a strong password (min 6 characters) that you do not use elsewhere.</p>
+      {msg && (
+        <div className="card pad" style={{ borderColor: msg.k === 'ok' ? 'var(--green)' : 'var(--red)', fontSize: 13, marginBottom: 12 }}>
+          {msg.t}
+        </div>
+      )}
+      <div className="grid" style={{ gap: 10, maxWidth: 420 }}>
+        <div className="field"><label>Current password</label><input type="password" value={cur} onChange={(e) => setCur(e.target.value)} /></div>
+        <div className="field"><label>New password</label><input type="password" value={nw} onChange={(e) => setNw(e.target.value)} /></div>
+        <div className="field"><label>Confirm new password</label><input type="password" value={cf} onChange={(e) => setCf(e.target.value)} /></div>
+        <button className="btn" disabled={busy} onClick={submit} style={{ alignSelf: 'flex-start' }}>{busy ? 'Updating…' : 'Update Password'}</button>
+      </div>
     </div>
   );
 }

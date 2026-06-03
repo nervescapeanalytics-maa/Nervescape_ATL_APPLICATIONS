@@ -50,20 +50,6 @@ export default function Layout({ title, subtitle, tabs, active, onTab, menu, chi
           </div>
         ))}
 
-        <div className="sb-foot">
-          <div className="sb-user">
-            <div className="avatar" title={user?.full_name}>{initials}</div>
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <b style={{ display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                {user?.full_name}
-              </b>
-              <div className="role">{role}</div>
-            </div>
-          </div>
-          <button className="btn ghost sm" style={{ width: '100%', marginTop: 8 }} onClick={logout}>
-            ⎋ Sign out
-          </button>
-        </div>
       </aside>
 
       <main className="app-main">
