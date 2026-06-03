@@ -218,28 +218,160 @@ const AITOOLS = [
   { i: '💡', t: 'Lesson Insights', d: 'Spot tricky topics from student performance' },
 ];
 
-function AIAssistant() {
+const ASSIST_TOOLS: { key: string; i: string; t: string; d: string; placeholder: string; sample: string }[] = [
+  { key: 'grading', i: '📋', t: 'Smart Grading', d: 'AI evaluates tinkering & brain-teaser answers', placeholder: 'Paste the question and the student\'s answer…', sample: 'Question: Why does a line-follower robot use two IR sensors?\nStudent answer: So it can see the black line on both sides and stay on track when it turns.' },
+  { key: 'insights', i: '💡', t: 'Lesson Insights', d: 'Spot tricky topics from student performance', placeholder: 'Describe how your class performed (topics, scores, struggles)…', sample: 'Class 7 Robotics: sensor calibration avg 38%, circuits 52%, loops in code 55%. Many students confuse voltage and current.' },
+  { key: 'rubric', i: '✍️', t: 'Rubric Builder', d: 'Draft fair rubrics for projects', placeholder: 'Describe the project or assignment to build a rubric for…', sample: 'A Class 8 project to build and present an IoT smart-dustbin prototype using an ultrasonic sensor and servo.' },
+  { key: 'translate', i: '🌐', t: 'Translate & Simplify', d: 'Make content accessible to every learner', placeholder: 'Paste the content to simplify or translate…', sample: 'Explain how a microcontroller reads an analog sensor value and converts it to a digital number a program can use.' },
+  { key: 'analytics', i: '📊', t: 'Class Analytics', d: 'Understand strengths and gaps at a glance', placeholder: 'Paste your class data or a short performance summary…', sample: 'Robotics builds: strong. AI/ML quiz avg 41%. Debugging tasks often incomplete. Top 5 students consistently above 85%.' },
+  { key: 'lesson', i: '📚', t: 'Lesson Planner', d: 'Draft a ready-to-teach lesson outline', placeholder: 'Enter the topic and class to plan a lesson…', sample: 'Class 6 — Introduction to breadboarding and simple LED circuits, 45 minute session.' },
+];
+
+function QuestionGenerator() {
   const [grades, setGrades] = useState<any[]>([]);
+  const [gid, setGid] = useState<number | ''>('');
+  const [modules, setModules] = useState<any[]>([]);
+  const [cid, setCid] = useState<number | ''>('');
+  const [count, setCount] = useState(5);
+  const [qtype, setQtype] = useState('mcq');
+  const [busy, setBusy] = useState(false);
+  const [result, setResult] = useState<any[] | null>(null);
+  const [saved, setSaved] = useState(false);
+  const [err, setErr] = useState('');
+
   useEffect(() => { apiGet('/content/grades').then((r: any) => setGrades(r.grades)).catch(() => {}); }, []);
+  useEffect(() => {
+    setCid(''); setModules([]);
+    if (gid !== '') apiGet(`/content/grades/${gid}/modules`).then((r: any) => setModules(r.modules)).catch(() => {});
+  }, [gid]);
+
+  async function run(save: boolean) {
+    if (cid === '') { setErr('Pick a chapter first.'); return; }
+    setErr(''); setBusy(true); setSaved(false);
+    try {
+      const r = await apiPost<{ generated: any[]; saved: boolean }>('/teacher/ai/generate-questions', { chapter_id: Number(cid), count, qtype, save });
+      setResult(r.generated); setSaved(r.saved);
+    } catch (e: any) { setErr(e.message || 'Generation failed'); }
+    finally { setBusy(false); }
+  }
+
   return (
     <div className="grid">
-      <Panel title="AI Teaching Assistant" icon="🤖" sub="Your co-pilot for planning, assessment and grading">
+      <div className="row" style={{ flexWrap: 'wrap', gap: 10, alignItems: 'flex-end' }}>
+        <div className="field" style={{ minWidth: 150 }}><label>Class</label>
+          <select value={gid} onChange={e => setGid(e.target.value === '' ? '' : Number(e.target.value))}>
+            <option value="">— select —</option>
+            {grades.map(g => <option key={g.id} value={g.id}>{g.name}</option>)}
+          </select>
+        </div>
+        <div className="field" style={{ minWidth: 220 }}><label>Chapter</label>
+          <select value={cid} onChange={e => setCid(e.target.value === '' ? '' : Number(e.target.value))} disabled={!modules.length}>
+            <option value="">— select —</option>
+            {modules.map(m => (
+              <optgroup key={m.id} label={m.title}>
+                {m.chapters.map((c: any) => <option key={c.id} value={c.id}>{c.title}</option>)}
+              </optgroup>
+            ))}
+          </select>
+        </div>
+        <div className="field" style={{ minWidth: 100 }}><label>Type</label>
+          <select value={qtype} onChange={e => setQtype(e.target.value)}>
+            <option value="mcq">MCQ</option>
+            <option value="oneliner">One-liner</option>
+            <option value="brain_teaser">Brain teaser</option>
+            <option value="tinkering">Tinkering</option>
+            <option value="computational">Computational</option>
+            <option value="logical">Logical</option>
+          </select>
+        </div>
+        <div className="field" style={{ minWidth: 80 }}><label>Count</label>
+          <select value={count} onChange={e => setCount(Number(e.target.value))}>
+            {[3, 5, 8, 10].map(n => <option key={n} value={n}>{n}</option>)}
+          </select>
+        </div>
+        <button className="btn" onClick={() => run(false)} disabled={busy}>{busy ? 'Generating…' : 'Generate'}</button>
+        <button className="btn ghost" onClick={() => run(true)} disabled={busy || cid === ''}>Generate & Save</button>
+      </div>
+      {err && <div className="err">{err}</div>}
+      {saved && <div className="card pad" style={{ borderColor: 'var(--green)' }}>✅ Questions saved to the chapter's question bank.</div>}
+      {result && (
+        <div className="card pad">
+          <h3 style={{ marginTop: 0 }}>Generated questions ({result.length})</h3>
+          <ol style={{ paddingLeft: 18, margin: 0, display: 'grid', gap: 14 }}>
+            {result.map((q, i) => (
+              <li key={i}>
+                <div style={{ fontWeight: 600 }}>{q.prompt}</div>
+                {Array.isArray(q.options) && q.options.length > 0 && (
+                  <ul style={{ margin: '4px 0' }}>{q.options.map((o: string, j: number) => <li key={j}>{o}</li>)}</ul>
+                )}
+                <div className="muted" style={{ fontSize: 13 }}><b>Answer:</b> {q.answer} {q.explanation ? `— ${q.explanation}` : ''}</div>
+              </li>
+            ))}
+          </ol>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function AssistTool({ tool }: { tool: typeof ASSIST_TOOLS[number] }) {
+  const [input, setInput] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [out, setOut] = useState('');
+  const [err, setErr] = useState('');
+
+  async function run() {
+    if (!input.trim()) { setErr('Enter some details first.'); return; }
+    setErr(''); setBusy(true); setOut('');
+    try {
+      const r = await apiPost<{ content: string }>('/teacher/ai/assist', { tool: tool.key, input });
+      setOut(r.content);
+    } catch (e: any) { setErr(e.message || 'Request failed'); }
+    finally { setBusy(false); }
+  }
+
+  return (
+    <div className="grid">
+      <div className="field">
+        <label>{tool.t} input</label>
+        <textarea rows={5} value={input} onChange={e => setInput(e.target.value)} placeholder={tool.placeholder} />
+      </div>
+      <div className="row" style={{ gap: 10 }}>
+        <button className="btn" onClick={run} disabled={busy}>{busy ? 'Working…' : `Run ${tool.t}`}</button>
+        <button className="btn ghost" onClick={() => setInput(tool.sample)} disabled={busy}>Use sample</button>
+      </div>
+      {err && <div className="err">{err}</div>}
+      {out && (
+        <div className="card pad" style={{ whiteSpace: 'pre-wrap', lineHeight: 1.55, fontSize: 14 }}>{out}</div>
+      )}
+    </div>
+  );
+}
+
+function AIAssistant() {
+  const [active, setActive] = useState<string>('questions');
+  const tools = [{ key: 'questions', i: '🧠', t: 'Auto Question Generator', d: 'Generate quizzes from any chapter instantly' }, ...ASSIST_TOOLS];
+  return (
+    <div className="grid">
+      <Panel title="AI Teaching Assistant" icon="🤖" sub="Your co-pilot for planning, assessment and grading — powered by your configured AI provider">
         <div className="proj-grid lg">
-          {AITOOLS.concat([
-            { i: '✍️', t: 'Rubric Builder', d: 'Draft fair rubrics for projects' },
-            { i: '🌐', t: 'Translate & Simplify', d: 'Make content accessible to every learner' },
-            { i: '📊', t: 'Class Analytics', d: 'Understand strengths and gaps at a glance' },
-          ]).map((t) => (
-            <div key={t.t} className="card pad proj-card">
+          {tools.map((t) => (
+            <button
+              key={t.key}
+              className={`card pad proj-card mentor-quick ${active === t.key ? 'is-active' : ''}`}
+              onClick={() => setActive(t.key)}
+            >
               <span style={{ fontSize: 30 }}>{t.i}</span>
               <h3 style={{ margin: '8px 0 4px' }}>{t.t}</h3>
               <p className="muted" style={{ fontSize: 13 }}>{t.d}</p>
-            </div>
+            </button>
           ))}
         </div>
       </Panel>
-      <Panel title="Generate Assessment" icon="🧪" sub="Open the Courses tab → pick a chapter → use the AI Question Generator">
-        <div className="muted" style={{ fontSize: 14 }}>Available classes: {grades.map((g) => g.name).join(', ') || '—'}. The AI generator supports MCQs, one-liners, brain teasers, tinkering, logical and computational questions.</div>
+      <Panel title={tools.find(t => t.key === active)?.t || 'Tool'} icon={tools.find(t => t.key === active)?.i || '🛠'} sub="All results use the LLM configured in Admin → AI Platform">
+        {active === 'questions'
+          ? <QuestionGenerator />
+          : <AssistTool tool={ASSIST_TOOLS.find(t => t.key === active)!} />}
       </Panel>
     </div>
   );

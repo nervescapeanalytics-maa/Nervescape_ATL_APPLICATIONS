@@ -1,6 +1,7 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth, Role } from '../auth';
+import { apiPost } from '../api';
 import { PROGRAMS, IMG } from '../data/programs';
 import Logo from '../components/Logo';
 import SiteFooter from '../components/SiteFooter';
@@ -57,6 +58,73 @@ const CURRICULUM = [
   { i: '🚀', t: 'Entrepreneurship (Tinkerpreneur projects)' },
 ];
 
+// Quick prompt suggestions for the public AI mentor
+const MENTOR_SUGGESTIONS = [
+  'What programs do you offer?',
+  'How does the AI mentor help students?',
+  'Which class should a 7th grader start with?',
+  'How do I get started?',
+];
+
+type MentorMsg = { role: 'user' | 'bot'; text: string };
+
+function PublicMentor({ onClose }: { onClose: () => void }) {
+  const [msgs, setMsgs] = useState<MentorMsg[]>([
+    { role: 'bot', text: "Hi! I'm Nerve 🤖 — your guide to the Nervescape ATL, Robotics & STEM platform. Ask me anything about our programs or how to get started!" },
+  ]);
+  const [text, setText] = useState('');
+  const [busy, setBusy] = useState(false);
+  const bodyRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    bodyRef.current?.scrollTo({ top: bodyRef.current.scrollHeight, behavior: 'smooth' });
+  }, [msgs, busy]);
+
+  async function send(q: string) {
+    const question = q.trim();
+    if (!question || busy) return;
+    setText('');
+    setMsgs((m) => [...m, { role: 'user', text: question }]);
+    setBusy(true);
+    try {
+      const r = await apiPost<{ answer: string }>('/public/chat', { message: question });
+      setMsgs((m) => [...m, { role: 'bot', text: r.answer }]);
+    } catch {
+      setMsgs((m) => [...m, { role: 'bot', text: 'Sorry, I had trouble responding just now. Please try again in a moment.' }]);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="pm-panel" role="dialog" aria-label="AI mentor chat">
+      <div className="pm-head">
+        <div className="pm-head-title"><span className="pm-avatar">🤖</span>
+          <div><strong>AI Mentor</strong><small>Online · 24×7</small></div>
+        </div>
+        <button className="pm-close" aria-label="Close chat" onClick={onClose}>×</button>
+      </div>
+      <div className="pm-body" ref={bodyRef}>
+        {msgs.map((m, i) => (
+          <div key={i} className={`pm-msg ${m.role}`}>{m.text}</div>
+        ))}
+        {busy && <div className="pm-msg bot pm-typing"><span /><span /><span /></div>}
+        {msgs.length <= 1 && !busy && (
+          <div className="pm-suggest">
+            {MENTOR_SUGGESTIONS.map((s) => (
+              <button key={s} onClick={() => send(s)}>{s}</button>
+            ))}
+          </div>
+        )}
+      </div>
+      <form className="pm-input" onSubmit={(e) => { e.preventDefault(); send(text); }}>
+        <input value={text} onChange={(e) => setText(e.target.value)} placeholder="Ask about our programs…" aria-label="Message" />
+        <button type="submit" disabled={busy || !text.trim()} aria-label="Send">➤</button>
+      </form>
+    </div>
+  );
+}
+
 // Premium full-bleed hero carousel slides
 const SLIDES = [
   {
@@ -66,6 +134,14 @@ const SLIDES = [
     d: 'A complete, hands-on innovation journey for Classes 6–12 — design, build and ship real projects with an AI mentor by your side every step of the way.',
     img: '1581091226825-a6a2a5aee158',
     g: 'linear-gradient(115deg,rgba(8,15,32,0.92) 8%,rgba(13,38,76,0.78) 48%,rgba(13,38,76,0.25) 100%)',
+    points: [
+      { i: '💡', t: 'Design thinking & problem framing' },
+      { i: '🧭', t: 'Computational & logical reasoning' },
+      { i: '🛠️', t: 'Hands-on ATL tinkering challenges' },
+      { i: '🤖', t: '24×7 AI mentor & instant feedback' },
+      { i: '🏆', t: 'XP, badges & live leaderboards' },
+      { i: '🔗', t: 'Admin → Teacher → Student wired' },
+    ],
   },
   {
     tag: 'Robotics',
@@ -74,6 +150,14 @@ const SLIDES = [
     d: 'Construct line-followers, obstacle-avoiders and robotic arms that sense the world, make decisions and move entirely on their own.',
     img: '1535378917042-10a22c95931a',
     g: 'linear-gradient(115deg,rgba(8,15,32,0.92) 8%,rgba(76,5,25,0.72) 48%,rgba(76,5,25,0.2) 100%)',
+    points: [
+      { i: '🔌', t: 'Electronics & breadboarding' },
+      { i: '🎛️', t: 'Sensors, Arduino & microcontrollers' },
+      { i: '🤖', t: 'Line-follower & obstacle-avoider bots' },
+      { i: '🦾', t: 'Servo-driven robotic arms' },
+      { i: '⚙️', t: 'Motor drivers & motion control' },
+      { i: '🔍', t: 'Debugging & iterative building' },
+    ],
   },
   {
     tag: 'AI · IoT · ML',
@@ -82,6 +166,14 @@ const SLIDES = [
     d: 'Train no-code AI models, wire smart IoT devices to the cloud and bring edge intelligence to everyday objects with industry-grade tooling.',
     img: '1620712943543-bcc4688e7485',
     g: 'linear-gradient(115deg,rgba(8,15,32,0.92) 8%,rgba(46,16,101,0.74) 48%,rgba(46,16,101,0.2) 100%)',
+    points: [
+      { i: '🧠', t: 'AI/ML basics, no-code model training' },
+      { i: '👁️', t: 'Computer vision starters' },
+      { i: '🌐', t: 'IoT & AIoT cloud integration' },
+      { i: '📡', t: 'Smart sensors & data pipelines' },
+      { i: '📊', t: 'Dashboards & live telemetry' },
+      { i: '⚡', t: 'Edge intelligence on devices' },
+    ],
   },
   {
     tag: 'Tinkerpreneur',
@@ -90,6 +182,14 @@ const SLIDES = [
     d: 'Turn prototypes into real student-led ventures — design with purpose, pitch with confidence and compete on a live national-style leaderboard.',
     img: '1556761175-5973dc0f32e7',
     g: 'linear-gradient(115deg,rgba(8,15,32,0.92) 8%,rgba(6,78,59,0.72) 48%,rgba(6,78,59,0.2) 100%)',
+    points: [
+      { i: '💡', t: 'Idea validation & problem-solution fit' },
+      { i: '🖨️', t: '3D modelling & rapid prototyping' },
+      { i: '🎤', t: 'Pitch decks & storytelling' },
+      { i: '💰', t: 'Business model & costing basics' },
+      { i: '🚀', t: 'Student-led venture projects' },
+      { i: '🏆', t: 'National-style competition' },
+    ],
   },
 ];
 
@@ -119,7 +219,7 @@ function HeroCarousel({ onExplore }: { onExplore: () => void }) {
               <a className="rb-hero-cta ghost" href="#why">Why Nervescape</a>
             </div>
             <ul className="hc-chips">
-              {CURRICULUM.slice(0, 6).map((c) => (
+              {s.points.map((c) => (
                 <li key={c.t}><span>{c.i}</span>{c.t}</li>
               ))}
             </ul>
@@ -157,6 +257,7 @@ export default function Landing() {
   const [err, setErr] = useState('');
   const [busy, setBusy] = useState(false);
   const [showLogin, setShowLogin] = useState(false);
+  const [mentorOpen, setMentorOpen] = useState(false);
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -182,7 +283,7 @@ export default function Landing() {
             <a href="#home">Home</a>
             <a onClick={() => navigate('/programs')}>Programs</a>
             <a href="#why">Why Nervescape</a>
-            <a onClick={() => navigate('/about')}>About</a>
+            <a onClick={() => navigate('/about')}>About Us</a>
             <a onClick={() => navigate('/contact')}>Contact</a>
             <a onClick={openLogin}>Sign in</a>
           </nav>
@@ -307,9 +408,10 @@ export default function Landing() {
       <SiteFooter />
 
       {/* floating AI mentor badge (bottom-right) */}
-      <button className="rb-mentor-badge" onClick={openLogin}>
+      <button className="rb-mentor-badge" onClick={() => setMentorOpen((o) => !o)}>
         <span className="rb-mentor-dot" />🤖 24×7 AI mentor
       </button>
+      {mentorOpen && <PublicMentor onClose={() => setMentorOpen(false)} />}
 
       {/* login modal — premium split panel */}
       {showLogin && (

@@ -266,3 +266,47 @@ export async function evaluateChallenge(prompt: string, response: string, userId
     model: cfg.model,
   };
 }
+
+// ---------------- Teacher AI tools (routes through admin-configured LLM) ----------------
+const TEACHER_TOOL_PROMPTS: Record<string, { sys: string; max: number }> = {
+  questions: { sys: 'You generate exam-ready questions for school STEM students. Be clear and age-appropriate.', max: 900 },
+  grading: { sys: 'You are an experienced STEM teacher. Grade the student answer fairly out of 10, give a short rubric-based justification and one concrete improvement tip. Be concise.', max: 400 },
+  insights: { sys: 'You are a teaching-analytics assistant. From the class performance described, identify the trickiest topics, likely misconceptions and three concrete reteaching actions. Use short bullets.', max: 450 },
+  rubric: { sys: 'You are a curriculum designer. Produce a clear four-level scoring rubric (Excellent / Good / Fair / Needs work) with specific criteria for the given project or assignment.', max: 520 },
+  translate: { sys: 'You simplify and translate educational content for school students, keeping the meaning intact and using simple, friendly language.', max: 520 },
+  analytics: { sys: 'You are a class-analytics assistant. Summarise strengths, gaps and recommended next steps from the provided class data in clear bullet points.', max: 450 },
+  lesson: { sys: 'You are a master teacher. Create a concise lesson-plan outline with objectives, a warm-up, main activity, materials and an assessment for the given topic.', max: 650 },
+};
+
+export async function teacherAssist(tool: string, input: string, userId?: string): Promise<{ content: string; usage: LLMResult['usage']; model: string }> {
+  const p = TEACHER_TOOL_PROMPTS[tool] || { sys: 'You are a helpful AI teaching assistant for an ATL STEM school platform.', max: 500 };
+  const messages: ChatMessage[] = [{ role: 'system', content: p.sys }, { role: 'user', content: input }];
+  const { result, cfg } = await callFeature('chatbot', messages, { temperature: 0.6, maxTokens: p.max });
+  const offline = cfg.provider === 'offline' || !cfg.api_key || !cfg.enabled;
+  const content = offline ? teacherOfflineTool(tool, input) : result.content;
+  if (userId) await logAiUsage(userId, 'teacher_assist', result.usage, cfg.model);
+  return { content, usage: result.usage, model: cfg.model };
+}
+
+function teacherOfflineTool(tool: string, input: string): string {
+  const topic = (input || '').trim().slice(0, 80) || 'this topic';
+  switch (tool) {
+    case 'grading':
+      return `Score: 8 / 10\n\n✅ Strengths: Clear grasp of the core idea with a relevant example.\n🔧 To improve: Add step-by-step reasoning and define the key terms used.\n➡️ Next step: Ask the student to predict one more case to test their logic.`;
+    case 'insights':
+      return `Trickiest topics this week\n• Sensor calibration — 38% accuracy\n• Series vs parallel circuits — 52%\n• Loop logic in code — 55%\n\nLikely misconceptions: confusing voltage with current; treating loops as a one-time step.\nReteach actions:\n1. Live breadboard demo with a multimeter.\n2. A quick 3-question exit ticket.\n3. Pair-programming on a simple loop task.`;
+    case 'rubric':
+      return `Rubric — ${topic}\n\n• Excellent (9-10): Fully working, well documented, creative extension beyond the brief.\n• Good (7-8): Works with minor gaps; clear documentation.\n• Fair (5-6): Partially works; basic documentation.\n• Needs work (0-4): Incomplete or non-working; little documentation.`;
+    case 'translate':
+      return `Simplified version of "${topic}":\n\nIn simple words — break the idea into small steps, connect it to something you see every day, then try it yourself and watch what changes.\n\nTip: check understanding with one quick question before moving on.`;
+    case 'analytics':
+      return `Class snapshot — ${topic}\n• Strengths: robotics builds and teamwork are strong.\n• Gaps: AI/ML basics and systematic debugging need work.\n• Next steps: daily 5-minute logic warm-ups, one guided ML mini-project, and targeted help for the lowest-scoring 20%.`;
+    case 'lesson':
+      return `Lesson plan — ${topic}\n\nObjective: students can explain and apply the core concept.\nWarm-up (5m): a real-life hook question.\nMain activity (25m): hands-on build / guided practice.\nMaterials: worksheet, breadboard / kit, slides.\nAssessment: 3-question exit ticket + one tinkering challenge.`;
+    case 'questions':
+      return `Sample questions on ${topic}:\n1. (MCQ) Which statement best describes ${topic}?\n2. (One-liner) In one line, what is the main idea of ${topic}?\n3. (Brain teaser) If you changed one variable in ${topic}, what would happen and why?\n\nOpen Courses → pick a chapter → AI Question Generator to create and save a full set.`;
+    default:
+      return `Here is a quick draft for "${topic}". Configure a live AI provider in Admin → AI Platform for richer, fully personalised results.`;
+  }
+}
+

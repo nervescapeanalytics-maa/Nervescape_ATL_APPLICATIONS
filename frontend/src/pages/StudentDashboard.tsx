@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { apiGet, apiPost } from '../api';
 import { useAuth } from '../auth';
@@ -535,31 +535,70 @@ function Leaderboard() {
 // ============================================================
 
 function AIMentor() {
+  const QUICK = [
+    { i: '💡', t: 'Ask Concept Questions', p: 'Explain the concept of sensors and how they work, with a simple real-life example.' },
+    { i: '🛠', t: 'Get Tinkering Hints', p: 'I am building a line-follower robot but it keeps drifting off the line. Give me step-by-step hints to fix it.' },
+    { i: '🧠', t: 'Logic & Brain Teaser Help', p: 'Give me a fun logic brain teaser and guide me to solve it step by step.' },
+    { i: '📖', t: 'Chapter Summaries', p: 'Give me a quick revision summary of the basics of electronics and breadboarding.' },
+  ];
+  const [msgs, setMsgs] = useState<{ role: 'user' | 'bot'; text: string }[]>([
+    { role: 'bot', text: "Hi, I'm TinkerBot 🤖 — your 24×7 AI mentor! Ask me anything about your chapters, get hints for your builds, or pick a quick-start below to begin." },
+  ]);
+  const [text, setText] = useState('');
+  const [busy, setBusy] = useState(false);
+  const bodyRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    bodyRef.current?.scrollTo({ top: bodyRef.current.scrollHeight, behavior: 'smooth' });
+  }, [msgs, busy]);
+
+  async function send(q: string) {
+    const question = q.trim();
+    if (!question || busy) return;
+    setText('');
+    setMsgs(m => [...m, { role: 'user', text: question }]);
+    setBusy(true);
+    try {
+      const r = await apiPost<{ answer: string }>('/student/chat', { chapter_id: null, message: question });
+      setMsgs(m => [...m, { role: 'bot', text: r.answer }]);
+    } catch {
+      setMsgs(m => [...m, { role: 'bot', text: 'Sorry, I had trouble responding just now. Please try again in a moment.' }]);
+    } finally {
+      setBusy(false);
+    }
+  }
+
   return (
     <div className="grid">
       <div className="card pad dash-hero" style={{ background: 'linear-gradient(120deg,#0d1b3e,#1e3a6e)' }}>
         <div>
           <span className="kicker">AI MENTOR</span>
           <h2 style={{ color: '#fff', margin: '8px 0 6px' }}>TinkerBot — Your 24×7 AI Mentor 🤖</h2>
-          <p style={{ color: '#b0c4de', margin: 0 }}>Ask any question about your chapters, get hints for challenges, and get personalised learning guidance.</p>
+          <p style={{ color: '#b0c4de', margin: 0 }}>Ask any question about your chapters, get hints for challenges, and get personalised learning guidance — right here.</p>
         </div>
       </div>
-      <div className="card pad">
-        <p style={{ fontSize: 14 }}>The AI Mentor chatbot is available on every chapter page. Click <b>🤖 TinkerBot</b> in the bottom-right corner to start chatting.</p>
-        <div className="proj-grid lg">
-          {[
-            { i: '💡', t: 'Ask Concept Questions', d: 'Get clear explanations of any topic in your chapter' },
-            { i: '🛠', t: 'Get Tinkering Hints', d: 'Stuck on a build? TinkerBot gives step-by-step guidance' },
-            { i: '🧠', t: 'Logic & Brain Teaser Help', d: 'Break down complex problems with AI-guided reasoning' },
-            { i: '📖', t: 'Chapter Summaries', d: 'Quick revision summaries for last-minute prep' },
-          ].map(f => (
-            <div key={f.t} className="card pad proj-card">
-              <span style={{ fontSize: 28 }}>{f.i}</span>
-              <h3 style={{ margin: '8px 0 4px', fontSize: 14 }}>{f.t}</h3>
-              <p className="muted" style={{ fontSize: 13 }}>{f.d}</p>
-            </div>
+
+      <div className="proj-grid lg">
+        {QUICK.map(f => (
+          <button key={f.t} className="card pad proj-card mentor-quick" onClick={() => send(f.p)} disabled={busy}>
+            <span style={{ fontSize: 28 }}>{f.i}</span>
+            <h3 style={{ margin: '8px 0 4px', fontSize: 14 }}>{f.t}</h3>
+            <p className="muted" style={{ fontSize: 13 }}>Tap to ask TinkerBot</p>
+          </button>
+        ))}
+      </div>
+
+      <div className="card pad mentor-chat">
+        <div className="mentor-body" ref={bodyRef}>
+          {msgs.map((m, i) => (
+            <div key={i} className={`mentor-msg ${m.role}`}>{m.text}</div>
           ))}
+          {busy && <div className="mentor-msg bot mentor-typing"><span /><span /><span /></div>}
         </div>
+        <form className="mentor-input" onSubmit={e => { e.preventDefault(); send(text); }}>
+          <input value={text} onChange={e => setText(e.target.value)} placeholder="Ask TinkerBot anything…" />
+          <button type="submit" disabled={busy || !text.trim()}>Send ➤</button>
+        </form>
       </div>
     </div>
   );

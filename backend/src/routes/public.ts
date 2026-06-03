@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { query } from '../db/pool';
 import { asyncH } from '../middleware/error';
+import { chatbotAnswer } from '../services/ai';
 
 const router = Router();
 
@@ -30,6 +31,18 @@ router.get('/stats', asyncH(async (_req, res) => {
 
 router.get('/health', asyncH(async (_req, res) => {
   res.json({ status: 'ok', time: new Date().toISOString() });
+}));
+
+// Public AI assistant for the landing page (no auth, no history persisted).
+router.post('/chat', asyncH(async (req, res) => {
+  const message = String(req.body?.message || '').trim().slice(0, 1000);
+  if (!message) { res.status(400).json({ error: 'message is required' }); return; }
+  const guidance =
+    'You are "Nerve", the friendly assistant on the Nervescape Analytics public website — an ATL Robotics, AI & STEM learning platform for school classes 6–12. ' +
+    'Answer questions about the programs (robotics, electronics, Arduino, IoT/AIoT, 3D modelling, AI/ML, entrepreneurship), how it works, and how to get started. ' +
+    'Be concise, welcoming and encourage visitors to explore the programs or sign in.';
+  const { answer } = await chatbotAnswer('Guest', null, [{ role: 'system', content: guidance }], message);
+  res.json({ answer });
 }));
 
 export default router;

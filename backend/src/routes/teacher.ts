@@ -5,7 +5,7 @@ import { one, query } from '../db/pool';
 import { authenticate, authorize } from '../middleware/auth';
 import { asyncH, httpError } from '../middleware/error';
 import { config } from '../config';
-import { generateQuestions, logAiUsage } from '../services/ai';
+import { generateQuestions, teacherAssist, logAiUsage } from '../services/ai';
 
 const router = Router();
 router.use(authenticate, authorize('teacher', 'admin'));
@@ -158,6 +158,17 @@ router.post('/ai/generate-questions', asyncH(async (req, res) => {
     }
   }
   res.json({ generated, saved: d.save });
+}));
+
+// ---- AI: generic teaching-assistant tools (routes through admin-configured LLM) ----
+const assistSchema = z.object({
+  tool: z.enum(['questions', 'grading', 'insights', 'rubric', 'translate', 'analytics', 'lesson']),
+  input: z.string().min(1).max(4000),
+});
+router.post('/ai/assist', asyncH(async (req, res) => {
+  const d = assistSchema.parse(req.body);
+  const { content, model } = await teacherAssist(d.tool, d.input, req.user!.id);
+  res.json({ content, model });
 }));
 
 // ---- students of teacher's grades ----
