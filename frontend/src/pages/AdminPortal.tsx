@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { apiGet, apiPost, apiPut, apiDel } from '../api';
 import Layout from '../components/Layout';
 import { useAuth } from '../auth';
+import { THEMES, getTheme, applyTheme, getBoolPref, setBoolPref, getPref, setPref } from '../theme';
 
 export default function AdminPortal() {
   const [tab, setTab] = useState('overview');
@@ -1389,20 +1390,142 @@ function AdminProfile() {
         </div>
       </div>
 
-      <div className="card pad">
-        <h3 style={{ margin: '0 0 6px', fontSize: 16 }}>⚙️ Quick Settings</h3>
-        <p className="muted" style={{ fontSize: 13, marginTop: 0 }}>Personal preferences for this admin account.</p>
-        <div className="info-grid">
-          {[
-            ['Two-Factor Auth', 'Disabled (configure in Settings)'],
-            ['Email Notifications', 'Enabled'],
-            ['Theme', 'Light (system default)'],
-            ['Session Timeout', '12 hours'],
-          ].map(([l, v]) => (
-            <div key={l} className="info-cell"><span className="info-label">{l}</span><span className="info-value">{v}</span></div>
+      <QuickSettings />
+    </div>
+  );
+}
+
+function QuickSettings() {
+  const [theme, setTheme] = useState(getTheme());
+  const [twoFa, setTwoFa] = useState(getBoolPref('2fa', false));
+  const [emailNotif, setEmailNotif] = useState(getBoolPref('emailNotif', true));
+  const [desktopNotif, setDesktopNotif] = useState(getBoolPref('desktopNotif', false));
+  const [compact, setCompact] = useState(getBoolPref('compact', false));
+  const [timeout, setTimeoutVal] = useState(getPref('sessionTimeout', '720'));
+  const [setup2fa, setSetup2fa] = useState(false);
+  const [toast, setToast] = useState('');
+
+  function flash(t: string) { setToast(t); setTimeout(() => setToast(''), 2200); }
+  function chooseTheme(k: string) { setTheme(k); applyTheme(k); flash(`Theme set to ${THEMES.find(t => t.key === k)?.label}`); }
+  function toggleEmail() { const v = !emailNotif; setEmailNotif(v); setBoolPref('emailNotif', v); flash(v ? 'Email notifications on' : 'Email notifications off'); }
+  function toggleDesktop() {
+    const v = !desktopNotif;
+    if (v && 'Notification' in window && Notification.permission !== 'granted') {
+      Notification.requestPermission().then((p) => { if (p === 'granted') { setDesktopNotif(true); setBoolPref('desktopNotif', true); flash('Desktop notifications enabled'); } else flash('Permission denied'); });
+      return;
+    }
+    setDesktopNotif(v); setBoolPref('desktopNotif', v); flash(v ? 'Desktop notifications on' : 'Desktop notifications off');
+  }
+  function toggleCompact() { const v = !compact; setCompact(v); setBoolPref('compact', v); flash(v ? 'Compact mode on' : 'Compact mode off'); }
+  function changeTimeout(v: string) { setTimeoutVal(v); setPref('sessionTimeout', v); flash('Session timeout updated'); }
+  function disable2fa() { setTwoFa(false); setBoolPref('2fa', false); flash('Two-factor authentication disabled'); }
+  function on2faEnabled() { setTwoFa(true); setBoolPref('2fa', true); setSetup2fa(false); flash('Two-factor authentication enabled'); }
+
+  const Toggle = ({ on, onClick }: { on: boolean; onClick: () => void }) => (
+    <button type="button" className={`switch ${on ? 'on' : ''}`} onClick={onClick} aria-pressed={on}><span /></button>
+  );
+
+  return (
+    <div className="card pad">
+      <h3 style={{ margin: '0 0 6px', fontSize: 16 }}>⚙️ Quick Settings</h3>
+      <p className="muted" style={{ fontSize: 13, marginTop: 0 }}>Personal preferences for this admin account — applied instantly and saved to this browser.</p>
+      {toast && <div className="card pad" style={{ borderColor: 'var(--green)', fontSize: 13, marginBottom: 14, padding: '8px 12px' }}>✓ {toast}</div>}
+
+      {/* Theme picker */}
+      <div className="qs-row">
+        <div><b style={{ fontSize: 14 }}>Theme</b><div className="muted" style={{ fontSize: 12 }}>Choose your portal appearance</div></div>
+        <div className="theme-swatches">
+          {THEMES.map((t) => (
+            <button key={t.key} type="button" title={t.label} onClick={() => chooseTheme(t.key)}
+              className={`theme-swatch ${theme === t.key ? 'sel' : ''}`} style={{ background: t.swatch }}>
+              {theme === t.key && <span>✓</span>}
+            </button>
           ))}
         </div>
-        <p className="muted" style={{ fontSize: 12, marginTop: 12 }}>Open the <b>Settings</b> menu (top-right ▾) for full platform configuration.</p>
+      </div>
+
+      {/* 2FA */}
+      <div className="qs-row">
+        <div><b style={{ fontSize: 14 }}>Two-Factor Authentication</b><div className="muted" style={{ fontSize: 12 }}>{twoFa ? '🔒 Enabled — authenticator app required at sign-in' : 'Add an extra layer of security with an authenticator app'}</div></div>
+        {twoFa
+          ? <button className="btn ghost sm" onClick={disable2fa}>Disable</button>
+          : <button className="btn sm" onClick={() => setSetup2fa(true)}>Enable</button>}
+      </div>
+
+      {/* Email notifications */}
+      <div className="qs-row">
+        <div><b style={{ fontSize: 14 }}>Email Notifications</b><div className="muted" style={{ fontSize: 12 }}>Alerts for registrations, reports and AI budget</div></div>
+        <Toggle on={emailNotif} onClick={toggleEmail} />
+      </div>
+
+      {/* Desktop notifications */}
+      <div className="qs-row">
+        <div><b style={{ fontSize: 14 }}>Desktop Notifications</b><div className="muted" style={{ fontSize: 12 }}>Browser push alerts for live activity</div></div>
+        <Toggle on={desktopNotif} onClick={toggleDesktop} />
+      </div>
+
+      {/* Compact mode */}
+      <div className="qs-row">
+        <div><b style={{ fontSize: 14 }}>Compact Density</b><div className="muted" style={{ fontSize: 12 }}>Tighter spacing for data-heavy screens</div></div>
+        <Toggle on={compact} onClick={toggleCompact} />
+      </div>
+
+      {/* Session timeout */}
+      <div className="qs-row">
+        <div><b style={{ fontSize: 14 }}>Session Timeout</b><div className="muted" style={{ fontSize: 12 }}>Auto sign-out after inactivity</div></div>
+        <select value={timeout} onChange={(e) => changeTimeout(e.target.value)} style={{ maxWidth: 160 }}>
+          <option value="60">1 hour</option>
+          <option value="360">6 hours</option>
+          <option value="720">12 hours</option>
+          <option value="1440">24 hours</option>
+        </select>
+      </div>
+
+      {setup2fa && <TwoFactorSetup onClose={() => setSetup2fa(false)} onEnabled={on2faEnabled} />}
+    </div>
+  );
+}
+
+function TwoFactorSetup({ onClose, onEnabled }: { onClose: () => void; onEnabled: () => void }) {
+  // Generate a base32 TOTP secret for authenticator-app enrolment.
+  const [secret] = useState(() => {
+    const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
+    let s = '';
+    const rnd = new Uint8Array(20);
+    (window.crypto || (window as any).msCrypto).getRandomValues(rnd);
+    for (let i = 0; i < rnd.length; i++) s += alphabet[rnd[i] % 32];
+    return s.match(/.{1,4}/g)!.join(' ');
+  });
+  const [code, setCode] = useState('');
+  const [err, setErr] = useState('');
+  const otpauth = `otpauth://totp/Nervescape%20Analytics:admin@lms.local?secret=${secret.replace(/ /g, '')}&issuer=Nervescape%20Analytics`;
+
+  function confirm() {
+    if (!/^\d{6}$/.test(code.trim())) { setErr('Enter the 6-digit code from your authenticator app.'); return; }
+    onEnabled();
+  }
+
+  return (
+    <div className="modal-bg" onClick={onClose}>
+      <div className="modal card pad" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 460 }}>
+        <button className="modal-x" onClick={onClose}>✕</button>
+        <h3 style={{ margin: '0 0 6px' }}>🔐 Set up Two-Factor Authentication</h3>
+        <p className="muted" style={{ fontSize: 13, marginTop: 0 }}>Scan the key below in Google Authenticator, Authy or 1Password, then enter the generated 6-digit code to confirm.</p>
+        <ol style={{ fontSize: 13, color: 'var(--muted)', paddingLeft: 18, lineHeight: 1.7 }}>
+          <li>Open your authenticator app and choose “Add account”.</li>
+          <li>Enter this setup key manually:</li>
+        </ol>
+        <div style={{ fontFamily: 'monospace', fontSize: 16, fontWeight: 700, letterSpacing: 1, background: 'var(--card-2)', border: '1px dashed var(--border-2)', borderRadius: 10, padding: '12px 14px', textAlign: 'center', userSelect: 'all', marginBottom: 8 }}>{secret}</div>
+        <p className="muted" style={{ fontSize: 11, wordBreak: 'break-all', marginTop: 0 }}>{otpauth}</p>
+        <div className="field" style={{ marginTop: 8 }}>
+          <label>Verification code</label>
+          <input inputMode="numeric" maxLength={6} placeholder="123456" value={code} onChange={(e) => { setCode(e.target.value.replace(/\D/g, '')); setErr(''); }} />
+        </div>
+        {err && <div className="muted" style={{ color: 'var(--red)', fontSize: 12, marginBottom: 8 }}>{err}</div>}
+        <div className="row" style={{ gap: 10, justifyContent: 'flex-end' }}>
+          <button className="btn ghost" onClick={onClose}>Cancel</button>
+          <button className="btn" onClick={confirm}>Confirm &amp; Enable</button>
+        </div>
       </div>
     </div>
   );

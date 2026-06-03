@@ -34,10 +34,10 @@ const STATS = [
   { n: '6–12', l: 'Classes served' },
 ];
 const STEPS = [
-  { n: '01', i: '🧭', t: 'Pick your track', d: 'Choose from eight hands-on programs — robotics, IoT, AI/ML, 3D fabrication, entrepreneurship and more.' },
-  { n: '02', i: '🛠', t: 'Learn by building', d: 'Work through bite-sized chapters with live circuits, code and projects aligned to ATL outcomes.' },
-  { n: '03', i: '🤖', t: 'Get AI mentorship', d: 'A 24×7 context-aware mentor gives hints, explanations and instant feedback whenever you are stuck.' },
-  { n: '04', i: '🏆', t: 'Ship & compete', d: 'Submit projects, climb the leaderboard and earn XP as teachers and admins track your growth live.' },
+  { n: '01', i: '🧭', t: 'Pick your track', d: 'Choose from eight hands-on programs — robotics, IoT, AI/ML, 3D fabrication, entrepreneurship and more.', img: '1581092580497-e0d23cbdf1dc' },
+  { n: '02', i: '🛠', t: 'Learn by building', d: 'Work through bite-sized chapters with live circuits, code and projects aligned to ATL outcomes.', img: '1581091226825-a6a2a5aee158' },
+  { n: '03', i: '🤖', t: 'Get AI mentorship', d: 'A 24×7 context-aware mentor gives hints, explanations and instant feedback whenever you are stuck.', img: '1677442136019-21780ecad995' },
+  { n: '04', i: '🏆', t: 'Ship & compete', d: 'Submit projects, climb the leaderboard and earn XP as teachers and admins track your growth live.', img: '1552664730-d307ca884978' },
 ];
 const TESTIMONIALS = [
   { q: 'Our students went from never touching a breadboard to building autonomous robots in a single term. The platform makes innovation feel inevitable.', n: 'Anjali Mehta', r: 'ATL In-charge, Delhi Public School', a: '👩‍🏫' },
@@ -57,49 +57,89 @@ const CURRICULUM = [
   { i: '🚀', t: 'Entrepreneurship (Tinkerpreneur projects)' },
 ];
 
-// Live, auto-advancing hero slides
+// Premium full-bleed hero carousel slides
 const SLIDES = [
-  { tag: 'Robotics', t: 'Robots & Autonomous Bots', d: 'Build line-followers, obstacle-avoiders and mobile robots that sense, decide and move on their own.', img: '1535378917042-10a22c95931a', g: 'linear-gradient(135deg,rgba(15,23,42,0.78),rgba(76,5,25,0.88))' },
-  { tag: 'Embedded', t: 'Arduino & Microcontrollers', d: 'Give your projects a brain — program Arduino, ESP32 and microcontrollers to read the world in real time.', img: '1553406830-ef2513450d76', g: 'linear-gradient(135deg,rgba(15,23,42,0.78),rgba(67,20,7,0.88))' },
-  { tag: 'Entrepreneurship', t: 'Tinkerpreneur Projects', d: 'Turn your ideas into real ventures — pitch, prototype and launch student-led innovation.', img: '1556761175-5973dc0f32e7', g: 'linear-gradient(135deg,rgba(15,23,42,0.78),rgba(8,47,73,0.88))' },
-  { tag: 'AI / ML', t: 'AI & Machine Learning', d: 'Teach machines to learn, classify and see — train models with industry-grade tools.', img: '1677442136019-21780ecad995', g: 'linear-gradient(135deg,rgba(15,23,42,0.78),rgba(59,7,100,0.88))' },
-  { tag: 'Fabrication', t: '3D Modelling & 3D Printing', d: 'Design parts in Tinkercad & CollabCAD, then print and assemble real working objects.', img: '1635070041078-e363dbe005cb', g: 'linear-gradient(135deg,rgba(15,23,42,0.78),rgba(46,16,101,0.88))' },
-  { tag: 'Electronics', t: 'Breadboarding & Live Circuits', d: 'Master voltage, current and components by building real, working circuits hands-on.', img: '1597852074816-d933c7d2b988', g: 'linear-gradient(135deg,rgba(15,23,42,0.78),rgba(6,78,59,0.88))' },
+  {
+    tag: 'Atal Tinkering Lab',
+    kicker: 'Welcome to Nervescape',
+    t: 'Where Curious Minds Become Makers',
+    d: 'A complete, hands-on innovation journey for Classes 6–12 — design, build and ship real projects with an AI mentor by your side every step of the way.',
+    img: '1581091226825-a6a2a5aee158',
+    g: 'linear-gradient(115deg,rgba(8,15,32,0.92) 8%,rgba(13,38,76,0.78) 48%,rgba(13,38,76,0.25) 100%)',
+  },
+  {
+    tag: 'Robotics',
+    kicker: 'Build machines that think',
+    t: 'Robots & Autonomous Systems',
+    d: 'Construct line-followers, obstacle-avoiders and robotic arms that sense the world, make decisions and move entirely on their own.',
+    img: '1535378917042-10a22c95931a',
+    g: 'linear-gradient(115deg,rgba(8,15,32,0.92) 8%,rgba(76,5,25,0.72) 48%,rgba(76,5,25,0.2) 100%)',
+  },
+  {
+    tag: 'AI · IoT · ML',
+    kicker: 'Real-world intelligence',
+    t: 'Teach Machines to Learn & Connect',
+    d: 'Train no-code AI models, wire smart IoT devices to the cloud and bring edge intelligence to everyday objects with industry-grade tooling.',
+    img: '1620712943543-bcc4688e7485',
+    g: 'linear-gradient(115deg,rgba(8,15,32,0.92) 8%,rgba(46,16,101,0.74) 48%,rgba(46,16,101,0.2) 100%)',
+  },
+  {
+    tag: 'Tinkerpreneur',
+    kicker: 'From idea to impact',
+    t: 'Innovate, Pitch & Launch',
+    d: 'Turn prototypes into real student-led ventures — design with purpose, pitch with confidence and compete on a live national-style leaderboard.',
+    img: '1556761175-5973dc0f32e7',
+    g: 'linear-gradient(115deg,rgba(8,15,32,0.92) 8%,rgba(6,78,59,0.72) 48%,rgba(6,78,59,0.2) 100%)',
+  },
 ];
 
-function HeroSlides() {
+function HeroCarousel({ onExplore }: { onExplore: () => void }) {
   const [idx, setIdx] = useState(0);
+  const go = (n: number) => setIdx((n + SLIDES.length) % SLIDES.length);
   useEffect(() => {
-    const id = setInterval(() => setIdx((i) => (i + 1) % SLIDES.length), 3500);
+    const id = setInterval(() => setIdx((i) => (i + 1) % SLIDES.length), 6000);
     return () => clearInterval(id);
   }, []);
   return (
-    <div className="rb-slides">
-      <div className="rb-slides-stage">
-        {SLIDES.map((s, i) => (
-          <article
-            key={s.t}
-            className={`rb-slide ${i === idx ? 'is-active' : ''}`}
-            style={{ backgroundImage: `${s.g}, url(${IMG(s.img, 1000)})` }}
-          >
-            <span className="rb-slide-tag">{s.tag}</span>
-            <div className="rb-slide-body">
-              <h3>{s.t}</h3>
-              <p>{s.d}</p>
+    <div className="hc">
+      {SLIDES.map((s, i) => (
+        <div
+          key={s.t}
+          className={`hc-slide ${i === idx ? 'is-active' : ''}`}
+          style={{ backgroundImage: `${s.g}, url(${IMG(s.img, 1800)})` }}
+          aria-hidden={i !== idx}
+        >
+          <div className="hc-inner">
+            <span className="hc-kicker">⚡ {s.kicker}</span>
+            <span className="hc-tag">{s.tag}</span>
+            <h1>{s.t}</h1>
+            <p>{s.d}</p>
+            <div className="hc-cta">
+              <button className="rb-hero-cta primary" onClick={onExplore}>Explore programs →</button>
+              <a className="rb-hero-cta ghost" href="#why">Why Nervescape</a>
             </div>
-          </article>
-        ))}
-        <div className="rb-slide-orb rb-orb-a" />
-        <div className="rb-slide-orb rb-orb-b" />
-        <div className="rb-slide-chip rb-chip-1">⚡ 700+ chapters</div>
-      </div>
-      <div className="rb-slide-dots">
+            <ul className="hc-chips">
+              {CURRICULUM.slice(0, 6).map((c) => (
+                <li key={c.t}><span>{c.i}</span>{c.t}</li>
+              ))}
+            </ul>
+          </div>
+        </div>
+      ))}
+
+      <span className="hc-orb hc-orb-a" aria-hidden="true" />
+      <span className="hc-orb hc-orb-b" aria-hidden="true" />
+
+      <button className="hc-arrow prev" aria-label="Previous slide" onClick={() => go(idx - 1)}>‹</button>
+      <button className="hc-arrow next" aria-label="Next slide" onClick={() => go(idx + 1)}>›</button>
+
+      <div className="hc-dots">
         {SLIDES.map((s, i) => (
           <button
             key={s.t}
             aria-label={`Go to slide ${i + 1}`}
             className={i === idx ? 'on' : ''}
-            onClick={() => setIdx(i)}
+            onClick={() => go(i)}
           />
         ))}
       </div>
@@ -149,33 +189,9 @@ export default function Landing() {
         </div>
       </header>
 
-      {/* hero */}
-      <section id="home" className="rb-hero">
-        <div className="rb-hero-bg" aria-hidden="true">
-          <span className="rb-grid-lines" />
-          <span className="rb-glow rb-glow-1" />
-          <span className="rb-glow rb-glow-2" />
-          <span className="rb-glow rb-glow-3" />
-        </div>
-        <div className="rb-hero-grid">
-          <div className="rb-hero-copy">
-            <span className="rb-hero-badge">⚡ ATL · Robotics · AI · STEM — Classes 6–12</span>
-            <h1>Build. Tinker.<br /><b>Innovate from Class 6.</b></h1>
-            <p className="lead">
-              Nervescape Analytics is a next-generation Atal Tinkering Lab platform with a complete,
-              hands-on innovation journey:
-            </p>
-            <ul className="rb-curriculum">
-              {CURRICULUM.map((c) => (
-                <li key={c.t}><span className="rb-cur-ico">{c.i}</span>{c.t}</li>
-              ))}
-            </ul>
-            <div className="rb-hero-actions">
-              <button className="rb-hero-cta primary" onClick={() => navigate('/programs')}>Explore programs →</button>
-            </div>
-          </div>
-          <div className="rb-hero-art"><HeroSlides /></div>
-        </div>
+      {/* hero — premium full-width carousel */}
+      <section id="home" className="rb-hero2">
+        <HeroCarousel onExplore={() => navigate('/programs')} />
       </section>
 
       {/* programs */}
@@ -240,10 +256,15 @@ export default function Landing() {
           <div className="rb-steps">
             {STEPS.map((s) => (
               <article key={s.n} className="rb-step">
-                <span className="rb-step-n">{s.n}</span>
-                <span className="rb-step-ico">{s.i}</span>
-                <h3>{s.t}</h3>
-                <p>{s.d}</p>
+                <div className="rb-step-img">
+                  <img loading="lazy" src={IMG(s.img, 600)} alt={s.t} />
+                  <span className="rb-step-n">{s.n}</span>
+                  <span className="rb-step-ico">{s.i}</span>
+                </div>
+                <div className="rb-step-body">
+                  <h3>{s.t}</h3>
+                  <p>{s.d}</p>
+                </div>
               </article>
             ))}
           </div>
