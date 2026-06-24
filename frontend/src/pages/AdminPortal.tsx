@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { apiGet, apiPost, apiPut, apiDel } from '../api';
 import Layout from '../components/Layout';
 import { useAuth } from '../auth';
@@ -10,16 +11,30 @@ import CourseRepository from '../components/academic/CourseRepository';
 import LearningLevels from '../components/academic/LearningLevels';
 
 export default function AdminPortal() {
-  const [tab, setTab] = useState('overview');
+  const [searchParams, setSearchParams] = useSearchParams();
+  const initialTab = searchParams.get('tab') || 'overview';
+  const [tab, setTab] = useState(initialTab);
+
+  function goTab(k: string) {
+    setTab(k);
+    if (k === 'overview') setSearchParams({}, { replace: true });
+    else setSearchParams({ tab: k }, { replace: true });
+  }
+
+  useEffect(() => {
+    const t = searchParams.get('tab');
+    if (t && t !== tab) setTab(t);
+  }, [searchParams]);
+
   return (
     <Layout
       title="Admin Console"
       subtitle="Govern schools, users, courses & operations across the Nervescape network"
       active={tab}
-      onTab={setTab}
+      onTab={goTab}
       menu={[
-        { key: 'profile', label: 'My Profile', icon: '👤', onClick: () => setTab('profile') },
-        { key: 'settings', label: 'Settings', icon: '⚙️', onClick: () => setTab('settings') },
+        { key: 'profile', label: 'My Profile', icon: '👤', onClick: () => goTab('profile') },
+        { key: 'settings', label: 'Settings', icon: '⚙️', onClick: () => goTab('settings') },
       ]}
       tabs={[
         { key: 'overview', label: 'Control Center', icon: '🏠', group: 'Overview' },
@@ -45,7 +60,7 @@ export default function AdminPortal() {
         { key: 'ai', label: 'AI Platform', icon: '🤖', group: 'System' },
       ]}
     >
-      {tab === 'overview' && <Overview go={setTab} />}
+      {tab === 'overview' && <Overview go={goTab} />}
       {tab === 'activity' && <ActivityFeed />}
       {tab === 'repository' && <CourseRepository />}
       {tab === 'levels' && <LearningLevels />}
@@ -101,10 +116,13 @@ function Bars({ data }: { data: { label: string; value: number }[] }) {
 
 const MODULES: { i: string; t: string; d: string; tab: string }[] = [
   // LIVE modules (have working tab)
+  { i: '🗄️', t: 'Course Repository', d: 'Central course hub — maintain once, map to any class', tab: 'repository' },
+  { i: '📊', t: 'Learning Levels', d: 'AI Sprouts through Capstone — ten learning bands', tab: 'levels' },
   { i: '👩‍🏫', t: 'Teachers', d: 'Onboard, enable/disable & manage educators', tab: 'teachers' },
   { i: '🎒', t: 'Students', d: 'Enrolment, class assignment & progress', tab: 'students' },
   { i: '🔗', t: 'Assignments', d: 'Wire teachers to classes & modules', tab: 'assignments' },
-  { i: '📚', t: 'Courses', d: 'Live curriculum for Class 6, 7 & 8 — view in Teacher portal', tab: 'students' },
+  { i: '📚', t: 'Class Editor', d: 'Per-class modules, chapters & publish controls', tab: 'courses' },
+  { i: '🗂️', t: 'Curriculum Library', d: 'Browse innovation tracks & chapter analytics', tab: 'curriculum' },
   // Roadmap (clearly tagged)
   { i: '🏫', t: 'Schools', d: 'Manage partner schools & branches', tab: '' },
   { i: '👨\u200d👩\u200d👧', t: 'Parents', d: 'Guardian accounts & reports', tab: '' },
