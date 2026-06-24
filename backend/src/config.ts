@@ -33,6 +33,24 @@ export const config = {
     apiKey: process.env.AI_API_KEY || '',
     model: process.env.AI_MODEL || 'gpt-4o-mini',
   },
+  contact: {
+    supportEmail: process.env.SUPPORT_EMAIL || 'support@nervescape.com',
+    callbackMessage:
+      process.env.CONTACT_CALLBACK_MESSAGE ||
+      'Thank you for contacting us. We are arranging a callback for you shortly.',
+    forwardTo: (process.env.CONTACT_FORWARD_TO || '')
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean),
+    smtp: {
+      host: process.env.SMTP_HOST || '',
+      port: int(process.env.SMTP_PORT, 587),
+      secure: (process.env.SMTP_SECURE || 'false').toLowerCase() === 'true',
+      user: process.env.SMTP_USER || '',
+      pass: process.env.SMTP_PASS || '',
+      from: process.env.SMTP_FROM || process.env.SMTP_USER || 'support@nervescape.com',
+    },
+  },
   seed: {
     adminEmail: process.env.SEED_ADMIN_EMAIL || 'admin@lms.local',
     adminPassword: process.env.SEED_ADMIN_PASSWORD || 'Admin@123',

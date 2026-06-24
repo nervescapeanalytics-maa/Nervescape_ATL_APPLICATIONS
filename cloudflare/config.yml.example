@@ -1,0 +1,18 @@
+# Cloudflare Tunnel ingress (config-file mode).
+# Copy to config.yml and place credentials.json from:
+#   cloudflared tunnel create <name>
+#   cloudflared tunnel route dns <name> <hostname>
+#
+# Do NOT commit config.yml or credentials.json (see cloudflare/.gitignore).
+
+tunnel: REPLACE_WITH_TUNNEL_UUID
+credentials-file: /etc/cloudflared/credentials.json
+
+ingress:
+  # Public hostname → LMS frontend (nginx proxies /api to backend)
+  - hostname: robotinkerpreneur.com
+    service: http://robofrontend:80
+  - hostname: www.robotinkerpreneur.com
+    service: http://robofrontend:80
+  # Catch-all (required)
+  - service: http_status:404

@@ -229,6 +229,7 @@ const ASSIST_TOOLS: { key: string; i: string; t: string; d: string; placeholder:
 
 function QuestionGenerator() {
   const [grades, setGrades] = useState<any[]>([]);
+  const [assignments, setAssignments] = useState<any[] | null>(null);
   const [gid, setGid] = useState<number | ''>('');
   const [modules, setModules] = useState<any[]>([]);
   const [cid, setCid] = useState<number | ''>('');
@@ -239,11 +240,30 @@ function QuestionGenerator() {
   const [saved, setSaved] = useState(false);
   const [err, setErr] = useState('');
 
-  useEffect(() => { apiGet('/content/grades').then((r: any) => setGrades(r.grades)).catch(() => {}); }, []);
+  useEffect(() => {
+    // load teacher's assigned grades (scoped) + their full assignments (for module filtering)
+    apiGet('/teacher/overview').then((r: any) => setGrades(r.grades)).catch(() => {});
+    apiGet('/teacher/assignments').then((r: any) => setAssignments(r.assignments)).catch(() => {});
+  }, []);
+
   useEffect(() => {
     setCid(''); setModules([]);
-    if (gid !== '') apiGet(`/content/grades/${gid}/modules`).then((r: any) => setModules(r.modules)).catch(() => {});
-  }, [gid]);
+    if (gid === '') return;
+    // load all modules for the grade, then filter by module assignments if needed
+    apiGet(`/content/grades/${gid}/modules`).then((r: any) => {
+      let mods: any[] = r.modules;
+      if (assignments) {
+        // assignments is null = admin (see all); array = filter by assigned module_ids for this grade
+        const gradeAssignments = assignments.filter((a: any) => a.grade_id === Number(gid));
+        const hasGradeLevelAccess = gradeAssignments.some((a: any) => a.module_id === null);
+        if (!hasGradeLevelAccess && gradeAssignments.length > 0) {
+          const allowedModuleIds = new Set(gradeAssignments.map((a: any) => a.module_id));
+          mods = mods.filter((m: any) => allowedModuleIds.has(m.id));
+        }
+      }
+      setModules(mods);
+    }).catch(() => {});
+  }, [gid, assignments]);
 
   async function run(save: boolean) {
     if (cid === '') { setErr('Pick a chapter first.'); return; }
@@ -435,12 +455,32 @@ function Students() {
 
 function Curriculum() {
   const [grades, setGrades] = useState<any[]>([]);
+  const [assignments, setAssignments] = useState<any[] | null>(null);
   const [gid, setGid] = useState<number | null>(null);
   const [modules, setModules] = useState<any[]>([]);
   const [editing, setEditing] = useState<any>(null);
 
-  useEffect(() => { apiGet('/content/grades').then((r: any) => { setGrades(r.grades); if (r.grades[0]) setGid(r.grades[0].id); }).catch(() => {}); }, []);
-  useEffect(() => { if (gid) apiGet(`/content/grades/${gid}/modules`).then((r: any) => setModules(r.modules)).catch(() => {}); }, [gid]);
+  useEffect(() => {
+    // Use teacher-scoped grades, not public
+    apiGet('/teacher/overview').then((r: any) => { setGrades(r.grades); if (r.grades[0]) setGid(r.grades[0].id); }).catch(() => {});
+    apiGet('/teacher/assignments').then((r: any) => setAssignments(r.assignments)).catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    if (!gid) return;
+    apiGet(`/content/grades/${gid}/modules`).then((r: any) => {
+      let mods: any[] = r.modules;
+      if (assignments) {
+        const gradeAssignments = assignments.filter((a: any) => a.grade_id === gid);
+        const hasGradeLevelAccess = gradeAssignments.some((a: any) => a.module_id === null);
+        if (!hasGradeLevelAccess && gradeAssignments.length > 0) {
+          const allowedModuleIds = new Set(gradeAssignments.map((a: any) => a.module_id));
+          mods = mods.filter((m: any) => allowedModuleIds.has(m.id));
+        }
+      }
+      setModules(mods);
+    }).catch(() => {});
+  }, [gid, assignments]);
 
   if (editing) return <ChapterEditor chapterId={editing} onClose={() => { setEditing(null); if (gid) apiGet(`/content/grades/${gid}/modules`).then((r: any) => setModules(r.modules)); }} />;
 
@@ -565,47 +605,174 @@ function ChapterEditor({ chapterId, onClose }: { chapterId: number; onClose: () 
 // NEW TEACHER TABS
 // ============================================================
 
+// ---- Chart helpers ----
+function HBar({ label, value, max, color = '#6366f1', note }: { label: string; value: number; max: number; color?: string; note?: string }) {
+  const pct = max > 0 ? Math.min((value / max) * 100, 100) : 0;
+  return (
+    <div style={{ display: 'grid', gridTemplateColumns: '120px 1fr 50px', gap: 8, alignItems: 'center', marginBottom: 6 }}>
+      <span style={{ fontSize: 12, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} className="muted">{label}</span>
+      <div style={{ background: 'rgba(255,255,255,0.06)', borderRadius: 4, height: 16, overflow: 'hidden', position: 'relative' }}>
+        <div style={{ width: `${pct}%`, height: '100%', background: color, borderRadius: 4, transition: 'width 0.5s ease' }} />
+        {note && <span style={{ position: 'absolute', left: 6, top: '50%', transform: 'translateY(-50%)', fontSize: 10, color: '#fff', fontWeight: 600 }}>{note}</span>}
+      </div>
+      <b style={{ fontSize: 12, textAlign: 'right' }}>{value}</b>
+    </div>
+  );
+}
+
+function ScoreBar({ value }: { value: number }) {
+  const color = value >= 70 ? 'var(--green)' : value >= 40 ? 'var(--yellow)' : 'var(--pink)';
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+      <div style={{ flex: 1, background: 'rgba(255,255,255,0.06)', borderRadius: 4, height: 10, overflow: 'hidden' }}>
+        <div style={{ width: `${value}%`, height: '100%', background: color, borderRadius: 4 }} />
+      </div>
+      <span style={{ color, fontSize: 12, fontWeight: 700, minWidth: 36 }}>{value}%</span>
+    </div>
+  );
+}
+
+function exportCSV(rows: any[], filename: string) {
+  if (!rows.length) return;
+  const headers = Object.keys(rows[0]);
+  const lines = [headers.join(','), ...rows.map(r => headers.map(h => `"${r[h] ?? ''}"`).join(','))];
+  const blob = new Blob([lines.join('\n')], { type: 'text/csv' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a'); a.href = url; a.download = filename; a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
 function Reports() {
   const [data, setData] = useState<any>(null);
+  const [view, setView] = useState<'overview' | 'students' | 'modules'>('overview');
   useEffect(() => { apiGet<any>('/teacher/reports').then(setData).catch(() => {}); }, []);
   if (!data) return <div className="spinner" />;
 
+  const { gradeStats, topStudents, moduleStats = [] } = data;
+  const maxStudents = Math.max(...gradeStats.map((g: any) => Number(g.students)), 1);
+  const maxCompletions = Math.max(...gradeStats.map((g: any) => Number(g.completions)), 1);
+  const maxModuleComp = Math.max(...moduleStats.map((m: any) => Number(m.completions)), 1);
+
   return (
     <div className="grid">
-      <Panel title="Class Reports & Analytics" icon="📈" sub="Aggregated performance across your assigned grades">
-        <table>
-          <thead><tr><th>Class</th><th>Students</th><th>Active Learners</th><th>Completions</th><th>Avg Score</th></tr></thead>
-          <tbody>
-            {data.gradeStats.map((g: any) => (
-              <tr key={g.grade}>
-                <td><b>{g.grade}</b></td>
-                <td>{g.students}</td>
-                <td>{g.active_learners}</td>
-                <td>{g.completions}</td>
-                <td><span style={{ color: Number(g.avg_score) >= 70 ? 'var(--green)' : Number(g.avg_score) >= 40 ? 'var(--yellow)' : 'var(--pink)' }}>{g.avg_score}%</span></td>
-              </tr>
+      {/* View switcher */}
+      <div className="row" style={{ gap: 8 }}>
+        {(['overview', 'students', 'modules'] as const).map(v => (
+          <button key={v} className={`btn sm ${view === v ? '' : 'ghost'}`} onClick={() => setView(v)} style={{ textTransform: 'capitalize' }}>{v}</button>
+        ))}
+        <div style={{ flex: 1 }} />
+        <button className="btn ghost sm" onClick={() => exportCSV(gradeStats, 'class-report.csv')}>⬇ Export Classes CSV</button>
+        <button className="btn ghost sm" onClick={() => exportCSV(topStudents, 'students-report.csv')}>⬇ Export Students CSV</button>
+      </div>
+
+      {/* ── OVERVIEW ── */}
+      {view === 'overview' && (
+        <>
+          {/* KPI row */}
+          <div className="kpi-row">
+            {[
+              { icon: '🎒', n: gradeStats.reduce((s: number, g: any) => s + Number(g.students), 0), l: 'Total Students', c: 'var(--primary-2)' },
+              { icon: '✅', n: gradeStats.reduce((s: number, g: any) => s + Number(g.completions), 0), l: 'Chapter Completions', c: 'var(--green)' },
+              { icon: '📝', n: gradeStats.reduce((s: number, g: any) => s + Number(g.quiz_attempts ?? 0), 0), l: 'Quiz Attempts', c: 'var(--yellow)' },
+              { icon: '📊', n: gradeStats.length ? Math.round(gradeStats.reduce((s: number, g: any) => s + Number(g.avg_score), 0) / gradeStats.length) : 0, l: 'Avg Score %', c: 'var(--purple)' },
+            ].map(k => (
+              <div key={k.l} className="card kpi">
+                <span className="kpi-ico" style={{ color: k.c }}>{k.icon}</span>
+                <div><div className="kpi-n">{k.n}</div><div className="muted" style={{ fontSize: 13 }}>{k.l}</div></div>
+              </div>
             ))}
-            {data.gradeStats.length === 0 && <tr><td colSpan={5} className="muted">No data yet.</td></tr>}
-          </tbody>
-        </table>
-      </Panel>
-      <Panel title="Top Students" icon="🏆">
-        <table>
-          <thead><tr><th>Rank</th><th>Student</th><th>Class</th><th>XP</th><th>Completed</th></tr></thead>
-          <tbody>
-            {data.topStudents.map((s: any, i: number) => (
-              <tr key={s.full_name}>
-                <td><b>#{i + 1}</b></td>
-                <td>{s.full_name}</td>
-                <td>{s.grade}</td>
-                <td><span style={{ color: 'var(--yellow)' }}>⭐ {s.xp}</span></td>
-                <td>{s.completed}</td>
-              </tr>
-            ))}
-            {data.topStudents.length === 0 && <tr><td colSpan={5} className="muted">No student activity yet.</td></tr>}
-          </tbody>
-        </table>
-      </Panel>
+          </div>
+
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+            <Panel title="Students per Class" icon="🎒">
+              {gradeStats.map((g: any) => <HBar key={g.grade} label={g.grade} value={Number(g.students)} max={maxStudents} color="#6366f1" />)}
+              {gradeStats.length === 0 && <div className="muted">No data yet.</div>}
+            </Panel>
+            <Panel title="Chapter Completions" icon="✅">
+              {gradeStats.map((g: any) => <HBar key={g.grade} label={g.grade} value={Number(g.completions)} max={maxCompletions} color="#22c55e" />)}
+              {gradeStats.length === 0 && <div className="muted">No data yet.</div>}
+            </Panel>
+          </div>
+
+          <Panel title="Average Score by Class" icon="📊" sub="Color: green ≥70%, yellow ≥40%, red <40%">
+            <table>
+              <thead><tr><th>Class</th><th>Students</th><th>Active Learners</th><th>Quiz Attempts</th><th>Avg Score</th></tr></thead>
+              <tbody>
+                {gradeStats.map((g: any) => (
+                  <tr key={g.grade}>
+                    <td><b>{g.grade}</b></td>
+                    <td>{g.students}</td>
+                    <td>{g.active_learners}</td>
+                    <td>{g.quiz_attempts ?? 0}</td>
+                    <td style={{ minWidth: 160 }}><ScoreBar value={Number(g.avg_score)} /></td>
+                  </tr>
+                ))}
+                {gradeStats.length === 0 && <tr><td colSpan={5} className="muted">No data yet.</td></tr>}
+              </tbody>
+            </table>
+          </Panel>
+        </>
+      )}
+
+      {/* ── STUDENTS ── */}
+      {view === 'students' && (
+        <Panel title="Student Leaderboard" icon="🏆" sub="Top students ranked by XP (earned from quiz best-scores)">
+          <table>
+            <thead>
+              <tr><th>Rank</th><th>Student</th><th>Class</th><th>XP</th><th>Chapters Done</th><th>Avg Quiz</th></tr>
+            </thead>
+            <tbody>
+              {topStudents.map((s: any, i: number) => {
+                const medal = i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : `#${i + 1}`;
+                return (
+                  <tr key={s.id || s.full_name}>
+                    <td><b>{medal}</b></td>
+                    <td>{s.full_name}</td>
+                    <td>{s.grade}</td>
+                    <td><span style={{ color: 'var(--yellow)' }}>⭐ {s.xp}</span></td>
+                    <td>{s.completed}</td>
+                    <td><ScoreBar value={Number(s.avg_quiz)} /></td>
+                  </tr>
+                );
+              })}
+              {topStudents.length === 0 && <tr><td colSpan={6} className="muted">No student activity yet.</td></tr>}
+            </tbody>
+          </table>
+        </Panel>
+      )}
+
+      {/* ── MODULES ── */}
+      {view === 'modules' && (
+        <Panel title="Module Performance" icon="📚" sub="Completion and average scores per course module">
+          {moduleStats.length === 0
+            ? <div className="muted">No module data yet.</div>
+            : (
+              <>
+                <div style={{ marginBottom: 16 }}>
+                  {moduleStats.map((m: any) => (
+                    <HBar key={`${m.grade}-${m.module}`} label={`${m.icon || '📘'} ${m.module} (${m.grade})`} value={Number(m.completions)} max={maxModuleComp} color="#a855f7" />
+                  ))}
+                </div>
+                <table>
+                  <thead><tr><th>Module</th><th>Class</th><th>Chapters</th><th>Completions</th><th>Avg Score</th></tr></thead>
+                  <tbody>
+                    {moduleStats.map((m: any) => (
+                      <tr key={`${m.grade}-${m.module}`}>
+                        <td>{m.icon || '📘'} <b>{m.module}</b></td>
+                        <td>{m.grade}</td>
+                        <td>{m.chapters}</td>
+                        <td>{m.completions}</td>
+                        <td><ScoreBar value={Number(m.avg_score)} /></td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                <button className="btn ghost sm" style={{ marginTop: 10 }} onClick={() => exportCSV(moduleStats, 'module-report.csv')}>⬇ Export Modules CSV</button>
+              </>
+            )
+          }
+        </Panel>
+      )}
     </div>
   );
 }

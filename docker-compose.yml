@@ -25,32 +25,57 @@ services:
       JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-12h}
       BCRYPT_ROUNDS: ${BCRYPT_ROUNDS:-10}
       AI_PROVIDER: ${AI_PROVIDER:-offline}
-      AI_BASE_URL: ${AI_BASE_URL:-https://api.openai.com/v1}
+      AI_BASE_URL: ${AI_BASE_URL:-https://generativelanguage.googleapis.com/v1beta/openai}
       AI_API_KEY: ${AI_API_KEY:-}
-      AI_MODEL: ${AI_MODEL:-gpt-4o-mini}
+      AI_MODEL: ${AI_MODEL:-gemini-2.5-flash-lite}
       SEED_ADMIN_EMAIL: ${SEED_ADMIN_EMAIL:-admin@lms.local}
       SEED_ADMIN_PASSWORD: ${SEED_ADMIN_PASSWORD:-Admin@123}
       SEED_TEACHER_PASSWORD: ${SEED_TEACHER_PASSWORD:-Teacher@123}
       SEED_STUDENT_PASSWORD: ${SEED_STUDENT_PASSWORD:-Student@123}
+      SUPPORT_EMAIL: ${SUPPORT_EMAIL:-support@nervescape.com}
+      CONTACT_CALLBACK_MESSAGE: ${CONTACT_CALLBACK_MESSAGE:-Thank you for reaching out. We are arranging a callback to your number shortly.}
+      CONTACT_FORWARD_TO: ${CONTACT_FORWARD_TO:-}
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_SECURE: ${SMTP_SECURE:-false}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASS: ${SMTP_PASS:-}
+      SMTP_FROM: ${SMTP_FROM:-}
     # Make host.containers.internal resolve to the host gateway
     extra_hosts:
       - "host.containers.internal:host-gateway"
     ports:
-      - "${API_PORT:-4000}:4000"
+      - "${API_PORT:-4001}:4000"
     networks:
       - lms
 
-  frontend:
+  robofrontend:
     build:
       context: ./frontend
       dockerfile: Dockerfile
     image: ai-lms-frontend:1.0.0
-    container_name: lms-frontend
+    container_name: lms-robofrontend
     restart: unless-stopped
     depends_on:
       - backend
     ports:
       - "${WEB_PORT:-8080}:80"
+    networks:
+      - lms
+
+  # Public access via Cloudflare Tunnel (optional — enable profile "cloudflare")
+  # Docs: cloudflare/CLOUDFLARE.md
+  cloudflared:
+    image: docker.io/cloudflare/cloudflared:2025.2.1
+    container_name: lms-cloudflared
+    restart: unless-stopped
+    profiles:
+      - cloudflare
+    command: tunnel --no-autoupdate --config /etc/cloudflared/config.yml run
+    volumes:
+      - ./cloudflare:/etc/cloudflared:ro,Z
+    depends_on:
+      - robofrontend
     networks:
       - lms
 

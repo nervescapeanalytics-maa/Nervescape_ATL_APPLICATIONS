@@ -59,4 +59,31 @@ router.get('/chapters/:id/questions', asyncH(async (req, res) => {
   res.json({ questions: rows });
 }));
 
+// Challenge bank — questions from the standalone challenge_questions table
+// Grouped by qtype; returns all or filtered by track/grade
+router.get('/challenges', asyncH(async (req, res) => {
+  const track = req.query.track as string | undefined;
+  const gradeLevel = req.query.grade as string | undefined;
+  const params: any[] = [];
+  let where = `WHERE 1=1`;
+  if (track) { params.push(track); where += ` AND track=$${params.length}`; }
+  if (gradeLevel) { params.push(gradeLevel); where += ` AND (grade_level='all' OR grade_level=$${params.length})`; }
+  const isStaff = req.user!.role !== 'student';
+  const answerCol = isStaff ? ', answer, explanation' : '';
+  const { rows } = await query(
+    `SELECT id, track, grade_level, qtype, difficulty, prompt, options, points${answerCol}
+     FROM challenge_questions ${where}
+     ORDER BY track, qtype, difficulty, id`, params
+  );
+  res.json({ questions: rows });
+}));
+
+// Reveal answer for a specific challenge question (students can reveal after submitting)
+router.get('/challenges/:id/answer', asyncH(async (req, res) => {
+  const id = Number(req.params.id);
+  const q = await one<any>(`SELECT answer, explanation FROM challenge_questions WHERE id=$1`, [id]);
+  if (!q) throw httpError(404, 'Question not found');
+  res.json({ answer: q.answer, explanation: q.explanation });
+}));
+
 export default router;

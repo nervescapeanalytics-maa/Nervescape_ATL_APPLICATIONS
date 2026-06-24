@@ -19,6 +19,7 @@ export default function Layout({ title, subtitle, tabs, active, onTab, menu, chi
   const initials = (user?.full_name || '?').split(' ').map((s) => s[0]).slice(0, 2).join('').toUpperCase();
   const role = user?.role || '';
   const groups = Array.from(new Set(tabs.map((t) => t.group || 'Main')));
+  const avatarUrl = user?.avatar_url;
 
   function pick(k: string) { onTab(k); setOpen(false); }
 
@@ -64,12 +65,20 @@ export default function Layout({ title, subtitle, tabs, active, onTab, menu, chi
           <div className="row" style={{ gap: 10 }}>
             <span className="pill">{role.toUpperCase()} PORTAL</span>
             <div className="user-menu">
-              <button className="avatar avatar-btn" title={user?.full_name} onClick={() => setUserOpen((v) => !v)}>{initials}</button>
+              <button className="avatar avatar-btn" title={user?.full_name} onClick={() => setUserOpen((v) => !v)} style={{ padding: 0, overflow: 'hidden' }}>
+                {avatarUrl
+                  ? <img src={avatarUrl} alt={initials} style={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: '50%' }} />
+                  : initials}
+              </button>
               {userOpen && <div className="um-backdrop" onClick={() => setUserOpen(false)} />}
               {userOpen && (
                 <div className="um-pop">
                   <div className="um-head">
-                    <div className="avatar lg">{initials}</div>
+                    <div className="avatar lg" style={{ padding: 0, overflow: 'hidden' }}>
+                      {avatarUrl
+                        ? <img src={avatarUrl} alt={initials} style={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: '50%' }} />
+                        : initials}
+                    </div>
                     <div style={{ minWidth: 0 }}>
                       <b style={{ display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{user?.full_name}</b>
                       <span className="um-email">{user?.email}</span>

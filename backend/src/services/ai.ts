@@ -45,13 +45,34 @@ async function loadFeatureConfig(key: string): Promise<FeatureConfig> {
     } catch { /* table may not exist before migrate on first boot */ }
     featureCache = { at: now, map };
   }
-  return featureCache.map.get(key) || {
+
+  const envProvider = (config.ai.provider || 'offline').toLowerCase();
+  const envApiKey = config.ai.apiKey || null;
+  const envLive = envProvider !== 'offline' && !!envApiKey;
+
+  // When a live provider is configured via environment, it always wins.
+  // This prevents a stale DB row (provider='offline') from silently disabling AI.
+  if (envLive) {
+    const db = featureCache.map.get(key);
+    return {
+      feature_key: key,
+      display_name: db?.display_name ?? key,
+      provider: envProvider,
+      model: config.ai.model,
+      base_url: config.ai.baseUrl,
+      api_key: envApiKey,
+      monthly_budget: db?.monthly_budget ?? 1_000_000,
+      enabled: true,
+    };
+  }
+
+  return featureCache.map.get(key) ?? {
     feature_key: key,
     display_name: key,
-    provider: (config.ai.provider || 'offline').toLowerCase(),
+    provider: 'offline',
     model: config.ai.model,
     base_url: config.ai.baseUrl,
-    api_key: config.ai.apiKey || null,
+    api_key: null,
     monthly_budget: 1_000_000,
     enabled: true,
   };
@@ -80,11 +101,34 @@ async function tokensThisMonth(feature: string): Promise<number> {
   } catch { return 0; }
 }
 
+/** Pause for `ms` milliseconds. */
+function sleep(ms: number): Promise<void> { return new Promise((r) => setTimeout(r, ms)); }
+
 async function callProvider(cfg: FeatureConfig, messages: ChatMessage[], opts: { temperature?: number; maxTokens?: number }): Promise<LLMResult> {
   const provider = cfg.provider.toLowerCase();
   if (provider === 'offline' || !cfg.api_key) {
     return { content: offlineReply(messages), usage: zeroUsage };
   }
+  // Retry up to 2 times on transient errors (503 / 429 rate-limit).
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      return await callProviderOnce(cfg, messages, opts);
+    } catch (e: any) {
+      const msg: string = e.message || '';
+      const transient = /503|502|UNAVAILABLE|rate.?limit|too.?many/i.test(msg);
+      if (!transient || attempt >= 1) {
+        console.warn(`[ai/${cfg.feature_key}] ${cfg.provider} call failed, using offline fallback:`, msg);
+        return { content: offlineReply(messages), usage: zeroUsage };
+      }
+      console.warn(`[ai/${cfg.feature_key}] transient error, retrying in 2s:`, msg.slice(0, 120));
+      await sleep(2000);
+    }
+  }
+  return { content: offlineReply(messages), usage: zeroUsage };
+}
+
+async function callProviderOnce(cfg: FeatureConfig, messages: ChatMessage[], opts: { temperature?: number; maxTokens?: number }): Promise<LLMResult> {
+  const provider = cfg.provider.toLowerCase();
   try {
     if (provider === 'claude' || provider === 'anthropic') {
       const sys = messages.find((m) => m.role === 'system')?.content;
@@ -93,7 +137,7 @@ async function callProvider(cfg: FeatureConfig, messages: ChatMessage[], opts: {
         method: 'POST',
         headers: {
           'content-type': 'application/json',
-          'x-api-key': cfg.api_key,
+          'x-api-key': cfg.api_key ?? '',
           'anthropic-version': '2023-06-01',
         },
         body: JSON.stringify({
@@ -126,9 +170,16 @@ async function callProvider(cfg: FeatureConfig, messages: ChatMessage[], opts: {
         max_tokens: opts.maxTokens ?? 700,
       }),
     });
-    if (!res.ok) throw new Error(`LLM HTTP ${res.status}`);
+    if (!res.ok) {
+      const errText = await res.text().catch(() => '');
+      throw new Error(`LLM HTTP ${res.status}: ${errText.slice(0, 300)}`);
+    }
     const data: any = await res.json();
-    const content = data.choices?.[0]?.message?.content?.trim() || offlineReply(messages);
+    const content = data.choices?.[0]?.message?.content?.trim();
+    if (!content) {
+      console.warn(`[ai/${cfg.feature_key}] empty content from ${cfg.provider}, raw:`, JSON.stringify(data).slice(0, 300));
+      return { content: offlineReply(messages), usage: zeroUsage };
+    }
     const usage = data.usage ? {
       prompt_tokens: data.usage.prompt_tokens || 0,
       completion_tokens: data.usage.completion_tokens || 0,
@@ -136,12 +187,11 @@ async function callProvider(cfg: FeatureConfig, messages: ChatMessage[], opts: {
     } : zeroUsage;
     return { content, usage };
   } catch (e) {
-    console.warn(`[ai/${cfg.feature_key}] ${cfg.provider} call failed, using offline fallback:`, (e as Error).message);
-    return { content: offlineReply(messages), usage: zeroUsage };
+    throw e; // Let callProvider handle retries and logging
   }
 }
 
-async function callFeature(featureKey: string, messages: ChatMessage[], opts: { temperature?: number; maxTokens?: number }): Promise<{ result: LLMResult; cfg: FeatureConfig }> {
+export async function callFeature(featureKey: string, messages: ChatMessage[], opts: { temperature?: number; maxTokens?: number }): Promise<{ result: LLMResult; cfg: FeatureConfig }> {
   const cfg = await loadFeatureConfig(featureKey);
   if (!cfg.enabled) return { result: { content: offlineReply(messages), usage: zeroUsage }, cfg };
   const used = await tokensThisMonth(featureKey);

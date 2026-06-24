@@ -17,6 +17,20 @@ async function teacherGradeIds(userId: string, role: string): Promise<number[] |
   return rows.map((r) => r.grade_id);
 }
 
+// return teacher's own grade + module assignment list (for UI scoping)
+router.get('/assignments', asyncH(async (req, res) => {
+  if (req.user!.role === 'admin') { res.json({ assignments: null }); return; }
+  const { rows } = await query(
+    `SELECT ta.grade_id, ta.module_id, g.name AS grade_name, m.title AS module_title, m.icon AS module_icon
+     FROM teacher_assignments ta
+     JOIN grades g ON g.id = ta.grade_id
+     LEFT JOIN modules m ON m.id = ta.module_id
+     WHERE ta.teacher_id = $1
+     ORDER BY g.number, m.order_index`, [req.user!.id]
+  );
+  res.json({ assignments: rows });
+}));
+
 router.get('/overview', asyncH(async (req, res) => {
   const gids = await teacherGradeIds(req.user!.id, req.user!.role);
   const gradeFilter = gids ? `WHERE g.id = ANY($1)` : '';
@@ -280,30 +294,49 @@ router.get('/reports', asyncH(async (req, res) => {
   let gradeWhere = '';
   if (gids) { params.push(gids); gradeWhere = `AND g.id = ANY($1)`; }
   const { rows: gradeStats } = await query(
-    `SELECT g.name AS grade,
-            COUNT(DISTINCT u.id) AS students,
-            COUNT(DISTINCT p.student_id) FILTER (WHERE p.status='completed') AS active_learners,
-            COALESCE(ROUND(AVG(p.best_score) FILTER (WHERE p.best_score > 0)), 0) AS avg_score,
-            COUNT(DISTINCT p.chapter_id) FILTER (WHERE p.status='completed') AS completions
+    `SELECT g.id AS grade_id, g.name AS grade,
+            COUNT(DISTINCT u.id)::int AS students,
+            COUNT(DISTINCT p.student_id) FILTER (WHERE p.status='completed')::int AS active_learners,
+            COALESCE(ROUND(AVG(p.best_score) FILTER (WHERE p.best_score > 0)), 0)::int AS avg_score,
+            COUNT(DISTINCT p.chapter_id) FILTER (WHERE p.status='completed')::int AS completions,
+            (SELECT count(*)::int FROM chapters c JOIN modules m ON m.id=c.module_id WHERE m.grade_id=g.id AND c.is_published) AS total_chapters,
+            COUNT(DISTINCT qa.id)::int AS quiz_attempts
      FROM grades g
      LEFT JOIN users u ON u.grade_id = g.id AND u.role = 'student'
      LEFT JOIN progress p ON p.student_id = u.id
+     LEFT JOIN quiz_attempts qa ON qa.student_id = u.id
      WHERE 1=1 ${gradeWhere}
      GROUP BY g.id, g.name, g.number
      ORDER BY g.number`, params
   );
   const { rows: topStudents } = await query(
-    `SELECT u.full_name, g.name AS grade,
-            COALESCE(SUM(p.best_score), 0) AS xp,
-            COUNT(p.chapter_id) FILTER (WHERE p.status='completed') AS completed
+    `SELECT u.id, u.full_name, g.name AS grade,
+            COALESCE(SUM(p.best_score), 0)::int AS xp,
+            COUNT(p.chapter_id) FILTER (WHERE p.status='completed')::int AS completed,
+            COALESCE(ROUND(AVG(qa.score::float/NULLIF(qa.total,0)*100)),0)::int AS avg_quiz
      FROM users u
      LEFT JOIN grades g ON g.id = u.grade_id
      LEFT JOIN progress p ON p.student_id = u.id
+     LEFT JOIN quiz_attempts qa ON qa.student_id = u.id
      WHERE u.role='student' ${gids ? `AND u.grade_id = ANY($1)` : ''}
      GROUP BY u.id, u.full_name, g.name
-     ORDER BY xp DESC LIMIT 10`, params
+     ORDER BY xp DESC LIMIT 15`, params
   );
-  res.json({ gradeStats, topStudents });
+  // module-level stats for the teacher's scope
+  const { rows: moduleStats } = await query(
+    `SELECT m.title AS module, m.icon, g.name AS grade,
+            count(DISTINCT c.id)::int AS chapters,
+            count(DISTINCT p.student_id) FILTER (WHERE p.status='completed')::int AS completions,
+            COALESCE(round(avg(p.best_score) FILTER (WHERE p.best_score > 0)),0)::int AS avg_score
+     FROM modules m
+     JOIN grades g ON g.id = m.grade_id
+     LEFT JOIN chapters c ON c.module_id = m.id
+     LEFT JOIN progress p ON p.chapter_id = c.id
+     WHERE 1=1 ${gids ? `AND m.grade_id = ANY($1)` : ''}
+     GROUP BY m.id, m.title, m.icon, g.name
+     ORDER BY completions DESC`, params
+  );
+  res.json({ gradeStats, topStudents, moduleStats });
 }));
 
 export default router;

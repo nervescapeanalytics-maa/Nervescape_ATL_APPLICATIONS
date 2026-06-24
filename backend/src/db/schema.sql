@@ -371,3 +371,69 @@ INSERT INTO ai_config (key, value) VALUES
   ('retention_chat_days','90'),
   ('retention_quiz_days','730')
 ON CONFLICT (key) DO NOTHING;
+
+-- =====================================================================
+-- Teaching roles: named permission bundles (grade + module scopes)
+-- =====================================================================
+CREATE TABLE IF NOT EXISTS teaching_roles (
+  id          SERIAL PRIMARY KEY,
+  name        TEXT NOT NULL UNIQUE,
+  description TEXT,
+  color       TEXT DEFAULT '#6366f1',
+  created_by  UUID REFERENCES users(id) ON DELETE SET NULL,
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- Each role grants access to one or more grade/module combinations
+CREATE TABLE IF NOT EXISTS teaching_role_scopes (
+  id        SERIAL PRIMARY KEY,
+  role_id   INT NOT NULL REFERENCES teaching_roles(id) ON DELETE CASCADE,
+  grade_id  INT NOT NULL REFERENCES grades(id) ON DELETE CASCADE,
+  module_id INT REFERENCES modules(id) ON DELETE CASCADE,
+  UNIQUE (role_id, grade_id, module_id)
+);
+CREATE INDEX IF NOT EXISTS idx_trs_role ON teaching_role_scopes(role_id);
+
+-- Assign a role to a teacher (teacher can have multiple roles)
+CREATE TABLE IF NOT EXISTS teaching_role_assignments (
+  id          SERIAL PRIMARY KEY,
+  teacher_id  UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  role_id     INT NOT NULL REFERENCES teaching_roles(id) ON DELETE CASCADE,
+  assigned_by UUID REFERENCES users(id) ON DELETE SET NULL,
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (teacher_id, role_id)
+);
+CREATE INDEX IF NOT EXISTS idx_tra_teacher ON teaching_role_assignments(teacher_id);
+
+-- =====================================================================
+-- Challenge questions bank (standalone, not chapter-specific)
+-- =====================================================================
+CREATE TABLE IF NOT EXISTS challenge_questions (
+  id          SERIAL PRIMARY KEY,
+  track       TEXT NOT NULL,         -- 'electronics','robotics','iot','3d','ai','entrepreneurship','computational','mechanics'
+  grade_level TEXT NOT NULL DEFAULT 'all',   -- 'all','6','7','8','9-12'
+  qtype       question_type NOT NULL,
+  difficulty  TEXT NOT NULL DEFAULT 'medium',  -- easy|medium|hard
+  prompt      TEXT NOT NULL,
+  options     JSONB DEFAULT '[]'::jsonb,
+  answer      TEXT,
+  explanation TEXT,
+  points      INT DEFAULT 10,
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_cq_track ON challenge_questions(track, qtype);
+
+-- =====================================================================
+-- Multi-class student access
+-- A student has one primary class (users.grade_id) and can be granted
+-- read access to additional classes by an admin.
+-- =====================================================================
+CREATE TABLE IF NOT EXISTS student_grade_access (
+  id          SERIAL PRIMARY KEY,
+  student_id  UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  grade_id    INT  NOT NULL REFERENCES grades(id) ON DELETE CASCADE,
+  granted_by  UUID REFERENCES users(id) ON DELETE SET NULL,
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (student_id, grade_id)
+);
+CREATE INDEX IF NOT EXISTS idx_sga_student ON student_grade_access(student_id);

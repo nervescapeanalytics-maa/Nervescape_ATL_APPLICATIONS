@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import SiteNav from '../components/SiteNav';
 import SiteFooter from '../components/SiteFooter';
+import { apiPost } from '../api';
 
 const REASONS = [
   { i: '🏫', t: 'For Schools', d: 'Launch an Atal Tinkering Lab programme with curriculum, training and analytics built in.' },
@@ -15,12 +16,33 @@ const OFFICES = [
 
 export default function Contact() {
   useEffect(() => { window.scrollTo(0, 0); }, []);
-  const [form, setForm] = useState({ name: '', email: '', org: '', topic: 'For Schools', message: '' });
+
+  const [form, setForm] = useState({ name: '', email: '', phone: '', org: '', topic: 'For Schools', message: '' });
   const [sent, setSent] = useState(false);
+  const [sending, setSending] = useState(false);
+  const [err, setErr] = useState('');
+  const [ack, setAck] = useState('');
+
   function set(k: string, v: string) { setForm((p) => ({ ...p, [k]: v })); }
-  function submit(e: React.FormEvent) {
+
+  async function submit(e: React.FormEvent) {
     e.preventDefault();
-    setSent(true);
+    setErr('');
+    setSending(true);
+    try {
+      const r = await apiPost<{ callback_message?: string }>('/public/contact', form);
+      setAck(r.callback_message || 'Thank you. Our team will reach out to you shortly.');
+      setSent(true);
+    } catch (e: any) {
+      setErr(e?.message || 'Could not submit your message right now. Please try again or email support@nervescape.com');
+    } finally {
+      setSending(false);
+    }
+  }
+
+  function reset() {
+    setSent(false); setErr(''); setAck('');
+    setForm({ name: '', email: '', phone: '', org: '', topic: 'For Schools', message: '' });
   }
 
   return (
@@ -76,22 +98,30 @@ export default function Contact() {
               <div className="contact-sent">
                 <span style={{ fontSize: 44 }}>✅</span>
                 <h3>Thank you, {form.name || 'there'}!</h3>
-                <p className="muted">Your message has been received. Our team will reach out to you shortly at {form.email || 'your email'}.</p>
-                <button className="rb-hero-cta primary" onClick={() => { setSent(false); setForm({ name: '', email: '', org: '', topic: 'For Schools', message: '' }); }}>Send another message</button>
+                <p className="muted">{ack}</p>
+                <p className="muted" style={{ fontSize: 13 }}>
+                  For urgent help, email us directly at{' '}
+                  <a href="mailto:support@nervescape.com">support@nervescape.com</a>.
+                </p>
+                <button className="rb-hero-cta primary" onClick={reset}>Send another message</button>
               </div>
             ) : (
               <form onSubmit={submit}>
                 <h3>Send us a message</h3>
-                <div className="field"><label>Full name</label><input value={form.name} onChange={(e) => set('name', e.target.value)} required placeholder="Your name" /></div>
-                <div className="field"><label>Work email</label><input type="email" value={form.email} onChange={(e) => set('email', e.target.value)} required placeholder="you@school.edu" /></div>
+                {err && <div className="err" style={{ marginBottom: 12 }}>{err}</div>}
+                <div className="field"><label>Full name *</label><input value={form.name} onChange={(e) => set('name', e.target.value)} required placeholder="Your name" /></div>
+                <div className="field"><label>Work email *</label><input type="email" value={form.email} onChange={(e) => set('email', e.target.value)} required placeholder="you@school.edu" /></div>
+                <div className="field"><label>Phone number</label><input type="tel" value={form.phone} onChange={(e) => set('phone', e.target.value)} placeholder="+91 XXXXX XXXXX" /></div>
                 <div className="field"><label>School / Organisation</label><input value={form.org} onChange={(e) => set('org', e.target.value)} placeholder="Your school or company" /></div>
-                <div className="field"><label>I'm reaching out about</label>
+                <div className="field"><label>I'm reaching out about *</label>
                   <select value={form.topic} onChange={(e) => set('topic', e.target.value)}>
                     {REASONS.map((r) => <option key={r.t}>{r.t}</option>)}
                   </select>
                 </div>
-                <div className="field"><label>Message</label><textarea rows={4} value={form.message} onChange={(e) => set('message', e.target.value)} required placeholder="Tell us about your goals…" /></div>
-                <button className="rb-hero-cta primary" style={{ width: '100%' }} type="submit">Send message →</button>
+                <div className="field"><label>Message *</label><textarea rows={4} value={form.message} onChange={(e) => set('message', e.target.value)} required placeholder="Tell us about your goals…" /></div>
+                <button className="rb-hero-cta primary" style={{ width: '100%' }} type="submit" disabled={sending}>
+                  {sending ? 'Sending…' : 'Send message →'}
+                </button>
                 <p className="muted" style={{ fontSize: 12, marginTop: 12, textAlign: 'center' }}>We respect your privacy. Your details are only used to respond to your enquiry.</p>
               </form>
             )}

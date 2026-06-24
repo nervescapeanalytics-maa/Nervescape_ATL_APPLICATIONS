@@ -49,7 +49,7 @@ router.get('/users', asyncH(async (req, res) => {
 }));
 
 const createUserSchema = z.object({
-  role: z.enum(['teacher', 'student']),
+  role: z.enum(['teacher', 'student', 'admin']),
   full_name: z.string().min(2),
   email: z.string().email(),
   username: z.string().min(3).optional(),
@@ -62,7 +62,8 @@ router.post('/users', asyncH(async (req, res) => {
   const data = createUserSchema.parse(req.body);
   const exists = await one(`SELECT 1 FROM users WHERE lower(email)=lower($1)`, [data.email]);
   if (exists) throw httpError(409, 'Email already in use');
-  const pwd = data.password || (data.role === 'teacher' ? config.seed.teacherPassword : config.seed.studentPassword);
+  const defaultPwd = data.role === 'admin' ? 'Admin@2026' : data.role === 'teacher' ? config.seed.teacherPassword : config.seed.studentPassword;
+  const pwd = data.password || defaultPwd;
   const hash = await bcrypt.hash(pwd, config.bcryptRounds);
   const u = await one<any>(
     `INSERT INTO users (role, full_name, email, username, password_hash, grade_id, phone, created_by)
@@ -102,8 +103,8 @@ router.put('/users/:id', asyncH(async (req, res) => {
 
 router.delete('/users/:id', asyncH(async (req, res) => {
   if (req.params.id === req.user!.id) throw httpError(400, 'You cannot delete your own account');
-  const r = await query(`DELETE FROM users WHERE id=$1 AND role <> 'admin'`, [req.params.id]);
-  if (!r.rowCount) throw httpError(404, 'User not found or cannot delete an admin');
+  const r = await query(`DELETE FROM users WHERE id=$1`, [req.params.id]);
+  if (!r.rowCount) throw httpError(404, 'User not found');
   res.json({ ok: true });
 }));
 
@@ -287,6 +288,7 @@ const chapterPatchSchema = z.object({
   order_index: z.number().int().optional(),
   is_published: z.boolean().optional(),
   hero_image: z.string().nullable().optional(),
+  content: z.array(z.any()).optional(),       // rich block content editable by admin
 });
 router.put('/chapters/:id', asyncH(async (req, res) => {
   const id = Number(req.params.id);
@@ -294,7 +296,13 @@ router.put('/chapters/:id', asyncH(async (req, res) => {
   const sets: string[] = []; const params: any[] = []; let i = 1;
   for (const [k, v] of Object.entries(d)) {
     if (v === undefined) continue;
-    sets.push(`${k}=$${i++}`); params.push(v);
+    // content is a JSON array — cast to jsonb in the SET clause
+    if (k === 'content') {
+      sets.push(`content=$${i++}::jsonb`);
+      params.push(JSON.stringify(v));
+    } else {
+      sets.push(`${k}=$${i++}`); params.push(v);
+    }
   }
   sets.push(`updated_by=$${i++}`); params.push(req.user!.id);
   if (sets.length === 1) throw httpError(400, 'No fields');
@@ -303,7 +311,7 @@ router.put('/chapters/:id', asyncH(async (req, res) => {
   if (!ch) throw httpError(404, 'Chapter not found');
   await query(
     `INSERT INTO activity_log (actor_id, action, entity, entity_id, meta) VALUES ($1,$2,$3,$4,$5)`,
-    [req.user!.id, 'update_chapter', 'chapter', String(id), JSON.stringify(d)]
+    [req.user!.id, 'update_chapter', 'chapter', String(id), JSON.stringify({ ...d, content: d.content ? `[${d.content.length} blocks]` : undefined })]
   );
   res.json({ chapter: ch });
 }));
@@ -517,9 +525,15 @@ router.put('/ai/config', asyncH(async (req, res) => {
   res.json({ ok: true });
 }));
 
-// ---- grades list (for dropdowns) ----
+// ---- grades list (for dropdowns + management) ----
 router.get('/grades', asyncH(async (_req, res) => {
-  const { rows } = await query(`SELECT id, name, number, level_label FROM grades WHERE is_active ORDER BY number`);
+  const { rows } = await query(
+    `SELECT g.id, g.number, g.name, g.level_label, g.description, g.is_active, g.created_at,
+       (SELECT count(*)::int FROM modules m WHERE m.grade_id=g.id) AS modules,
+       (SELECT count(*)::int FROM chapters c JOIN modules m ON m.id=c.module_id WHERE m.grade_id=g.id) AS chapters,
+       (SELECT count(*)::int FROM users u WHERE u.role='student' AND u.grade_id=g.id) AS students
+     FROM grades g ORDER BY g.number`
+  );
   res.json({ grades: rows });
 }));
 
@@ -798,6 +812,269 @@ router.get('/audit', asyncH(async (req, res) => {
   const { rows: actions } = await query(`SELECT DISTINCT action FROM activity_log ORDER BY action LIMIT 100`);
   const { rows: entities } = await query(`SELECT DISTINCT entity FROM activity_log WHERE entity IS NOT NULL ORDER BY entity LIMIT 100`);
   res.json({ activities: rows, total: total?.n ?? 0, actions: actions.map((a) => a.action), entities: entities.map((e) => e.entity) });
+}));
+
+// ---- grades (classes) management ----
+const gradeSchema = z.object({
+  number: z.number().int().min(1).max(12),
+  name: z.string().min(2),
+  level_label: z.string().optional(),
+  description: z.string().optional(),
+  is_active: z.boolean().optional(),
+});
+
+router.post('/grades', asyncH(async (req, res) => {
+  const d = gradeSchema.parse(req.body);
+  const existing = await one<any>(`SELECT id, is_active FROM grades WHERE number=$1`, [d.number]);
+  if (existing) {
+    // activate existing placeholder grade
+    const g = await one<any>(
+      `UPDATE grades SET name=$1, level_label=$2, description=$3, is_active=TRUE WHERE id=$4 RETURNING id, number, name, is_active`,
+      [d.name, d.level_label ?? null, d.description ?? null, existing.id]
+    );
+    await query(`INSERT INTO activity_log (actor_id, action, entity, entity_id) VALUES ($1,'activate_grade','grade',$2)`, [req.user!.id, String(existing.id)]);
+    res.json({ grade: g });
+  } else {
+    const g = await one<any>(
+      `INSERT INTO grades (number, name, level_label, description, is_active) VALUES ($1,$2,$3,$4,TRUE) RETURNING id, number, name, is_active`,
+      [d.number, d.name, d.level_label ?? null, d.description ?? null]
+    );
+    await query(`INSERT INTO activity_log (actor_id, action, entity, entity_id) VALUES ($1,'create_grade','grade',$2)`, [req.user!.id, String(g!.id)]);
+    res.status(201).json({ grade: g });
+  }
+}));
+
+router.put('/grades/:id', asyncH(async (req, res) => {
+  const id = Number(req.params.id);
+  const d = gradeSchema.partial().parse(req.body);
+  const sets: string[] = []; const params: any[] = []; let i = 1;
+  for (const [k, v] of Object.entries(d)) {
+    if (v === undefined) continue;
+    sets.push(`${k}=$${i++}`); params.push(v);
+  }
+  if (!sets.length) throw httpError(400, 'No fields to update');
+  params.push(id);
+  const g = await one<any>(`UPDATE grades SET ${sets.join(', ')} WHERE id=$${i} RETURNING id, number, name, is_active`, params);
+  if (!g) throw httpError(404, 'Grade not found');
+  await query(`INSERT INTO activity_log (actor_id, action, entity, entity_id) VALUES ($1,'update_grade','grade',$2)`, [req.user!.id, String(id)]);
+  res.json({ grade: g });
+}));
+
+// =====================================================================
+// TEACHING ROLES — named permission bundles for teachers
+// =====================================================================
+router.get('/roles', asyncH(async (_req, res) => {
+  const { rows: roles } = await query(
+    `SELECT tr.id, tr.name, tr.description, tr.color, tr.created_at,
+       (SELECT count(*)::int FROM teaching_role_assignments tra WHERE tra.role_id=tr.id) AS teacher_count,
+       json_agg(json_build_object('scope_id',trs.id,'grade_id',trs.grade_id,'grade_name',g.name,'module_id',trs.module_id,'module_title',m.title,'module_icon',m.icon) ORDER BY g.number, m.order_index) FILTER (WHERE trs.id IS NOT NULL) AS scopes
+     FROM teaching_roles tr
+     LEFT JOIN teaching_role_scopes trs ON trs.role_id=tr.id
+     LEFT JOIN grades g ON g.id=trs.grade_id
+     LEFT JOIN modules m ON m.id=trs.module_id
+     GROUP BY tr.id ORDER BY tr.name`
+  );
+  res.json({ roles });
+}));
+
+const roleSchema = z.object({
+  name: z.string().min(2).max(80),
+  description: z.string().optional(),
+  color: z.string().optional(),
+  scopes: z.array(z.object({ grade_id: z.number().int(), module_id: z.number().int().nullable().optional() })).default([]),
+});
+
+router.post('/roles', asyncH(async (req, res) => {
+  const d = roleSchema.parse(req.body);
+  const role = await one<any>(
+    `INSERT INTO teaching_roles (name, description, color, created_by) VALUES ($1,$2,$3,$4) RETURNING id, name`,
+    [d.name, d.description ?? '', d.color ?? '#6366f1', req.user!.id]
+  );
+  if (d.scopes.length) {
+    for (const s of d.scopes) {
+      await query(
+        `INSERT INTO teaching_role_scopes (role_id, grade_id, module_id) VALUES ($1,$2,$3) ON CONFLICT DO NOTHING`,
+        [role!.id, s.grade_id, s.module_id ?? null]
+      );
+    }
+  }
+  await query(`INSERT INTO activity_log (actor_id, action, entity, entity_id) VALUES ($1,'create_role','teaching_role',$2)`, [req.user!.id, String(role!.id)]);
+  res.status(201).json({ role });
+}));
+
+router.put('/roles/:id', asyncH(async (req, res) => {
+  const id = Number(req.params.id);
+  const d = roleSchema.partial().parse(req.body);
+  if (d.name || d.description !== undefined || d.color) {
+    const sets: string[] = []; const params: any[] = []; let i = 1;
+    if (d.name) { sets.push(`name=$${i++}`); params.push(d.name); }
+    if (d.description !== undefined) { sets.push(`description=$${i++}`); params.push(d.description); }
+    if (d.color) { sets.push(`color=$${i++}`); params.push(d.color); }
+    params.push(id);
+    if (sets.length) await query(`UPDATE teaching_roles SET ${sets.join(', ')} WHERE id=$${i}`, params);
+  }
+  // Replace scopes if provided
+  if (d.scopes !== undefined) {
+    await query(`DELETE FROM teaching_role_scopes WHERE role_id=$1`, [id]);
+    for (const s of d.scopes) {
+      await query(
+        `INSERT INTO teaching_role_scopes (role_id, grade_id, module_id) VALUES ($1,$2,$3) ON CONFLICT DO NOTHING`,
+        [id, s.grade_id, s.module_id ?? null]
+      );
+    }
+  }
+  res.json({ ok: true });
+}));
+
+router.delete('/roles/:id', asyncH(async (req, res) => {
+  const id = Number(req.params.id);
+  // Remove all assignments first
+  await query(`DELETE FROM teaching_role_assignments WHERE role_id=$1`, [id]);
+  await query(`DELETE FROM teaching_role_scopes WHERE role_id=$1`, [id]);
+  const r = await query(`DELETE FROM teaching_roles WHERE id=$1`, [id]);
+  if (!r.rowCount) throw httpError(404, 'Role not found');
+  res.json({ ok: true });
+}));
+
+// Assign/revoke role to a teacher
+router.post('/roles/:id/assign', asyncH(async (req, res) => {
+  const roleId = Number(req.params.id);
+  const { teacher_id } = z.object({ teacher_id: z.string().uuid() }).parse(req.body);
+  await query(
+    `INSERT INTO teaching_role_assignments (teacher_id, role_id, assigned_by) VALUES ($1,$2,$3) ON CONFLICT DO NOTHING`,
+    [teacher_id, roleId, req.user!.id]
+  );
+  // Sync teacher_assignments from role scopes
+  const { rows: scopes } = await query(`SELECT grade_id, module_id FROM teaching_role_scopes WHERE role_id=$1`, [roleId]);
+  for (const s of scopes) {
+    await query(
+      `INSERT INTO teacher_assignments (teacher_id, grade_id, module_id, assigned_by) VALUES ($1,$2,$3,$4) ON CONFLICT DO NOTHING`,
+      [teacher_id, s.grade_id, s.module_id ?? null, req.user!.id]
+    );
+  }
+  await query(`INSERT INTO activity_log (actor_id, action, entity, entity_id) VALUES ($1,'assign_role','teaching_role',$2)`, [req.user!.id, String(roleId)]);
+  res.json({ ok: true });
+}));
+
+router.delete('/roles/:id/assign/:teacherId', asyncH(async (req, res) => {
+  const roleId = Number(req.params.id);
+  const teacherId = req.params.teacherId;
+  await query(`DELETE FROM teaching_role_assignments WHERE role_id=$1 AND teacher_id=$2`, [roleId, teacherId]);
+  res.json({ ok: true });
+}));
+
+// Get teachers with their assigned roles
+router.get('/roles/teachers', asyncH(async (_req, res) => {
+  const { rows } = await query(
+    `SELECT u.id, u.full_name, u.email,
+       COALESCE(json_agg(json_build_object('role_id',tr.id,'role_name',tr.name,'color',tr.color)) FILTER (WHERE tr.id IS NOT NULL), '[]') AS roles
+     FROM users u
+     LEFT JOIN teaching_role_assignments tra ON tra.teacher_id=u.id
+     LEFT JOIN teaching_roles tr ON tr.id=tra.role_id
+     WHERE u.role='teacher' AND u.is_active
+     GROUP BY u.id ORDER BY u.full_name`
+  );
+  res.json({ teachers: rows });
+}));
+
+// ---- curriculum library (full tree: grades → modules → chapters) ----
+router.get('/curriculum', asyncH(async (_req, res) => {
+  const { rows: grades } = await query(`SELECT id, number, name, level_label, is_active FROM grades ORDER BY number`);
+  const { rows: modules } = await query(
+    `SELECT m.id, m.grade_id, m.title, m.icon, m.color, m.order_index,
+       (SELECT count(*)::int FROM chapters c WHERE c.module_id=m.id) AS chapter_count,
+       (SELECT count(*)::int FROM chapters c WHERE c.module_id=m.id AND c.is_published) AS published_count,
+       (SELECT count(*)::int FROM questions q JOIN chapters c ON c.id=q.chapter_id WHERE c.module_id=m.id) AS question_count
+     FROM modules m ORDER BY m.grade_id, m.order_index`
+  );
+  const { rows: chapterRows } = await query(
+    `SELECT c.id, c.module_id, c.title, c.difficulty, c.est_minutes, c.is_published, c.order_index,
+       (SELECT count(*)::int FROM questions q WHERE q.chapter_id=c.id) AS questions
+     FROM chapters c ORDER BY c.module_id, c.order_index`
+  );
+  // Build tree
+  const chaptersByModule = chapterRows.reduce((acc: any, c) => {
+    if (!acc[c.module_id]) acc[c.module_id] = [];
+    acc[c.module_id].push(c);
+    return acc;
+  }, {} as Record<number, any[]>);
+  const modulesByGrade = modules.reduce((acc: any, m) => {
+    if (!acc[m.grade_id]) acc[m.grade_id] = [];
+    acc[m.grade_id].push({ ...m, chapters: chaptersByModule[m.id] || [] });
+    return acc;
+  }, {} as Record<number, any[]>);
+  const tree = grades.map((g) => ({ ...g, modules: modulesByGrade[g.id] || [] }));
+  // Innovation tracks = distinct module titles across all grades
+  const { rows: tracks } = await query(
+    `SELECT m.title, m.icon, m.color,
+       count(DISTINCT m.grade_id)::int AS grades_count,
+       count(DISTINCT c.id)::int AS chapter_count,
+       count(DISTINCT q.id)::int AS question_count
+     FROM modules m
+     LEFT JOIN chapters c ON c.module_id=m.id
+     LEFT JOIN questions q ON q.chapter_id=c.id
+     GROUP BY m.title, m.icon, m.color
+     ORDER BY chapter_count DESC`
+  );
+  res.json({ tree, tracks });
+}));
+
+// ---- multi-class student access ----
+// Validate the :id path param is a well-formed UUID *and* belongs to a student.
+// Returns the student id (throws 400 on malformed UUID, 404 if not a student).
+// NOTE: the whole router is already gated by authorize('admin'); this app uses a
+// global-admin model, so any authenticated admin may manage student access.
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+async function requireStudentId(rawId: string): Promise<string> {
+  if (!rawId || !UUID_RE.test(rawId)) throw httpError(400, 'Invalid student id');
+  const student = await one<any>(`SELECT id, role FROM users WHERE id=$1`, [rawId]);
+  if (!student || student.role !== 'student') throw httpError(404, 'Student not found');
+  return rawId;
+}
+
+// GET  /admin/students/:id/grade-access  — list grades student can access
+router.get('/students/:id/grade-access', asyncH(async (req, res) => {
+  const studentId = await requireStudentId(req.params.id);
+  const { rows } = await query(
+    `SELECT sga.id, sga.grade_id, g.name AS grade_name, g.number AS grade_number,
+            sga.created_at, u.full_name AS granted_by_name
+     FROM student_grade_access sga
+     JOIN grades g ON g.id = sga.grade_id
+     LEFT JOIN users u ON u.id = sga.granted_by
+     WHERE sga.student_id = $1
+     ORDER BY g.number`,
+    [studentId]
+  );
+  res.json({ access: rows });
+}));
+
+// POST /admin/students/:id/grade-access  — grant access to a class
+router.post('/students/:id/grade-access', asyncH(async (req, res) => {
+  const studentId = await requireStudentId(req.params.id);
+  const gradeId = Number(req.body.grade_id);
+  if (!Number.isInteger(gradeId) || gradeId <= 0) throw httpError(400, 'grade_id required');
+  // Verify the target grade exists (avoids a foreign-key 500 on bad input)
+  const grade = await one<any>(`SELECT id FROM grades WHERE id=$1`, [gradeId]);
+  if (!grade) throw httpError(404, 'Class not found');
+  await query(
+    `INSERT INTO student_grade_access (student_id, grade_id, granted_by)
+     VALUES ($1,$2,$3) ON CONFLICT (student_id, grade_id) DO NOTHING`,
+    [studentId, gradeId, req.user!.id]
+  );
+  await query(
+    `INSERT INTO activity_log (actor_id, action, entity, entity_id, meta) VALUES ($1,$2,$3,$4,$5)`,
+    [req.user!.id, 'grant_grade_access', 'student', studentId, JSON.stringify({ grade_id: gradeId })]
+  );
+  res.status(201).json({ ok: true });
+}));
+
+// DELETE /admin/students/:id/grade-access/:gradeId — revoke access
+router.delete('/students/:id/grade-access/:gradeId', asyncH(async (req, res) => {
+  const studentId = await requireStudentId(req.params.id);
+  const gradeId = Number(req.params.gradeId);
+  if (!Number.isInteger(gradeId) || gradeId <= 0) throw httpError(400, 'Invalid grade id');
+  await query(`DELETE FROM student_grade_access WHERE student_id=$1 AND grade_id=$2`, [studentId, gradeId]);
+  res.json({ ok: true });
 }));
 
 export default router;

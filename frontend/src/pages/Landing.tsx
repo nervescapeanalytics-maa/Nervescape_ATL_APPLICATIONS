@@ -1,9 +1,9 @@
 import { useState, useEffect, useRef } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth, Role } from '../auth';
 import { apiPost } from '../api';
 import { PROGRAMS, IMG } from '../data/programs';
-import Logo from '../components/Logo';
+import Logo, { BrandName } from '../components/Logo';
 import SiteFooter from '../components/SiteFooter';
 
 const ROLES: { key: Role; label: string; emoji: string; blurb: string }[] = [
@@ -12,11 +12,6 @@ const ROLES: { key: Role; label: string; emoji: string; blurb: string }[] = [
   { key: 'student', label: 'Student Portal', emoji: '🎒', blurb: 'Robotics, projects, AI assessments & mentors' },
 ];
 
-const DEMO: Record<Role, { id: string; pw: string }> = {
-  admin: { id: 'admin@lms.local', pw: 'Admin@123' },
-  teacher: { id: 'teacher6@lms.local', pw: 'Teacher@123' },
-  student: { id: 'student61@lms.local', pw: 'Student@123' },
-};
 
 const WHY = [
   { t: 'Computational Thinking', d: 'Decompose complex problems, find patterns, abstract elegantly and build robust algorithms in every chapter.', i: '🧠', img: '1518186285589-2f7649de83e0' },
@@ -129,7 +124,7 @@ function PublicMentor({ onClose }: { onClose: () => void }) {
 const SLIDES = [
   {
     tag: 'Atal Tinkering Lab',
-    kicker: 'Welcome to Nervescape',
+    kicker: 'Welcome to Robo TinkerPreneur',
     t: 'Where Curious Minds Become Makers',
     d: 'A complete, hands-on innovation journey for Classes 6–12 — design, build and ship real projects with an AI mentor by your side every step of the way.',
     img: '1581091226825-a6a2a5aee158',
@@ -216,7 +211,7 @@ function HeroCarousel({ onExplore }: { onExplore: () => void }) {
             <p>{s.d}</p>
             <div className="hc-cta">
               <button className="rb-hero-cta primary" onClick={onExplore}>Explore programs →</button>
-              <a className="rb-hero-cta ghost" href="#why">Why Nervescape</a>
+              <a className="rb-hero-cta ghost" href="#why">Why Robo TinkerPreneur</a>
             </div>
             <ul className="hc-chips">
               {s.points.map((c) => (
@@ -251,6 +246,7 @@ function HeroCarousel({ onExplore }: { onExplore: () => void }) {
 export default function Landing() {
   const { login } = useAuth();
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [role, setRole] = useState<Role | null>(null);
   const [identifier, setId] = useState('');
   const [password, setPw] = useState('');
@@ -258,6 +254,15 @@ export default function Landing() {
   const [busy, setBusy] = useState(false);
   const [showLogin, setShowLogin] = useState(false);
   const [mentorOpen, setMentorOpen] = useState(false);
+  const [navOpen, setNavOpen] = useState(false);
+
+  // Auto-open login modal when ?login=1 is in URL (from footer/nav Sign In links)
+  useEffect(() => {
+    if (searchParams.get('login') === '1') {
+      setShowLogin(true);
+      setSearchParams({}, { replace: true });
+    }
+  }, [searchParams, setSearchParams]);
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -267,27 +272,57 @@ export default function Landing() {
     catch (e: any) { setErr(e.message || 'Login failed'); }
     finally { setBusy(false); }
   }
-  function pick(r: Role) { setRole(r); setErr(''); setId(DEMO[r].id); setPw(DEMO[r].pw); }
-  function openLogin() { setShowLogin(true); setRole(null); }
+  function pick(r: Role) { setRole(r); setErr(''); setId(''); setPw(''); }
+  function openLogin() { setShowLogin(true); setRole(null); setNavOpen(false); }
 
   return (
     <div className="landing">
-      {/* nav */}
-      <header className="rb-nav">
+      {/* ── Mobile-responsive landing nav ─────────────────────────── */}
+      <header className="rb-nav rb-nav-landing">
         <div className="rb-nav-inner">
-          <div className="rb-logo">
-            <Logo size={36} style={{ marginRight: 10 }} />
-            <span>Nerve<b>scape</b><small>ANALYTICS</small></span>
+          <div className="rb-logo" onClick={() => { window.scrollTo({ top: 0, behavior: 'smooth' }); }} style={{ cursor: 'pointer' }}>
+            <Logo size={40} style={{ marginRight: 10 }} />
+            <BrandName />
           </div>
+
+          {/* Desktop links */}
           <nav className="rb-nav-links">
             <a href="#home">Home</a>
-            <a onClick={() => navigate('/programs')}>Programs</a>
-            <a href="#why">Why Nervescape</a>
-            <a onClick={() => navigate('/about')}>About Us</a>
-            <a onClick={() => navigate('/contact')}>Contact</a>
-            <a onClick={openLogin}>Sign in</a>
+            <a onClick={() => navigate('/programs')} style={{ cursor: 'pointer' }}>Programs</a>
+            <a href="#why" style={{ cursor: 'pointer' }}>Why Us</a>
+            <a onClick={() => navigate('/about')} style={{ cursor: 'pointer' }}>About Us</a>
+            <a onClick={() => navigate('/contact')} style={{ cursor: 'pointer' }}>Contact</a>
+            <a onClick={openLogin} className="rb-nav-signin" style={{ cursor: 'pointer' }}>Sign In</a>
           </nav>
+
+          {/* Mobile: Sign In always visible + hamburger */}
+          <div className="rb-nav-mobile-actions">
+            <button className="rb-mobile-signin" onClick={openLogin}>Sign In</button>
+            <button
+              className="rb-hamburger"
+              aria-label={navOpen ? 'Close menu' : 'Open menu'}
+              aria-expanded={navOpen}
+              onClick={() => setNavOpen((v) => !v)}
+            >
+              {navOpen ? '✕' : '☰'}
+            </button>
+          </div>
         </div>
+
+        {/* Mobile dropdown */}
+        {navOpen && (
+          <div className="rb-mobile-menu" onClick={() => setNavOpen(false)}>
+            <nav onClick={(e) => e.stopPropagation()}>
+              <a href="#home" onClick={() => setNavOpen(false)}>🏠 Home</a>
+              <a onClick={() => { navigate('/programs'); setNavOpen(false); }} style={{ cursor: 'pointer' }}>📚 Programs</a>
+              <a href="#why" onClick={() => setNavOpen(false)}>⭐ Why Us</a>
+              <a onClick={() => { navigate('/about'); setNavOpen(false); }} style={{ cursor: 'pointer' }}>ℹ️ About Us</a>
+              <a onClick={() => { navigate('/contact'); setNavOpen(false); }} style={{ cursor: 'pointer' }}>✉️ Contact</a>
+              <div className="rb-mobile-menu-divider" />
+              <button className="rb-mobile-menu-signin" onClick={openLogin}>🔐 Sign In to Portal</button>
+            </nav>
+          </div>
+        )}
       </header>
 
       {/* hero — premium full-width carousel */}
@@ -318,7 +353,7 @@ export default function Landing() {
       <section id="why" className="rb-section alt">
         <div className="rb-section-inner">
           <div className="rb-section-head">
-            <span className="rb-kicker">Why Nervescape</span>
+            <span className="rb-kicker">Why Robo TinkerPreneur</span>
             <h2>The premium edge — powerful, intelligent, beautifully connected</h2>
             <p>A platform engineered for outcomes: every learner sharper, every teacher empowered, every administrator in command.</p>
           </div>
@@ -377,7 +412,7 @@ export default function Landing() {
         <div className="rb-section-inner">
           <div className="rb-section-head">
             <span className="rb-kicker">Loved by schools</span>
-            <h2>Educators and leaders trust Nervescape</h2>
+            <h2>Educators and leaders trust Robo TinkerPreneur</h2>
             <p>Real outcomes from the classrooms already building the future.</p>
           </div>
           <div className="rb-tst-grid">
@@ -419,7 +454,10 @@ export default function Landing() {
           <div className="lm-panel" onClick={(e) => e.stopPropagation()}>
             {/* left: branding */}
             <div className="lm-left">
-              <div className="lm-brand"><Logo size={40} style={{ marginBottom: 10 }} /><br/>Nerve<b>scape</b><br/><small>ANALYTICS</small></div>
+              <div className="lm-brand">
+                <Logo size={48} style={{ marginBottom: 10 }} />
+                <BrandName />
+              </div>
               <p className="lm-tagline">The next-generation ATL, Robotics &amp; STEM platform for Classes 6–12.</p>
               <ul className="lm-perks">
                 <li><span>🤖</span> AI-powered 24×7 mentor</li>
@@ -437,6 +475,11 @@ export default function Landing() {
             {/* right: form */}
             <div className="lm-right">
               <button className="modal-x" onClick={() => setShowLogin(false)}>✕</button>
+              {/* Logo strip — only visible on mobile where left panel is hidden */}
+              <div className="lm-mobile-brand">
+                <Logo size={32} />
+                <BrandName />
+              </div>
               {!role ? (
                 <>
                   <h2 className="lm-title">Sign in to your portal</h2>
@@ -463,7 +506,6 @@ export default function Landing() {
                     <div className="field"><label>Email or Username</label><input value={identifier} onChange={(e) => setId(e.target.value)} autoFocus required /></div>
                     <div className="field"><label>Password</label><input type="password" value={password} onChange={(e) => setPw(e.target.value)} required /></div>
                     <button className="btn lg" style={{ width: '100%', marginTop: 8 }} disabled={busy}>{busy ? 'Signing in…' : `Sign in →`}</button>
-                    <div className="demo"><b>Demo:</b> {DEMO[role].id} / {DEMO[role].pw}</div>
                   </form>
                 </>
               )}

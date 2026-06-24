@@ -1,6 +1,6 @@
 import { Link } from 'react-router-dom';
 import { PROGRAMS } from '../data/programs';
-import Logo from './Logo';
+import Logo, { BrandName } from './Logo';
 
 export const SOCIALS: { label: string; href: string; path: string }[] = [
   { label: 'LinkedIn', href: 'https://www.linkedin.com/company/nervescape-analytics', path: 'M4.98 3.5A2.5 2.5 0 1 1 0 3.5a2.5 2.5 0 0 1 4.98 0zM.25 8.25h4.5V24h-4.5V8.25zM8.25 8.25h4.31v2.15h.06c.6-1.14 2.07-2.34 4.26-2.34 4.56 0 5.4 3 5.4 6.9V24h-4.5v-6.96c0-1.66-.03-3.8-2.31-3.8-2.31 0-2.66 1.8-2.66 3.67V24h-4.5V8.25z' },
@@ -14,34 +14,44 @@ export default function SiteFooter() {
   return (
     <footer className="rb-footer">
       <div className="rb-footer-inner">
-        <div>
+
+        {/* Column 1: Brand + description + socials */}
+        <div className="rb-footer-brand">
           <div className="rb-logo" style={{ marginBottom: 12 }}>
-            <Logo size={32} style={{ marginRight: 8 }} />
-            <span>Nerve<b>scape</b><small style={{ color: '#cfd6dd' }}>ANALYTICS</small></span>
+            <Logo size={36} style={{ marginRight: 8 }} />
+            <BrandName />
           </div>
-          <p style={{ fontSize: 13, lineHeight: 1.6, color: '#cfd6dd', maxWidth: 320, margin: 0 }}>
-            Empowering Innovation in Education. A unified ATL, Robotics, AI &amp; STEM analytics platform for Classes 6–12.
+          <p style={{ fontSize: 13, lineHeight: 1.6, color: '#cfd6dd', maxWidth: 300, margin: '0 0 16px' }}>
+            Empowering Innovation in Education. A unified ATL, Robotics, AI &amp; STEM platform for Classes 6–12.
           </p>
-          <div className="rb-social">
+          <div className="rb-footer-socials">
             {SOCIALS.map((s) => (
               <a key={s.label} href={s.href} target="_blank" rel="noreferrer" aria-label={s.label} title={s.label}>
-                <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor" aria-hidden="true"><path d={s.path} /></svg>
+                <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor" aria-hidden="true">
+                  <path d={s.path} />
+                </svg>
               </a>
             ))}
           </div>
         </div>
+
+        {/* Column 2: Programs A */}
         <div>
           <h4>Programs</h4>
           {PROGRAMS.slice(0, 4).map((p) => (
             <Link key={p.slug} to={`/programs/${p.slug}`}>{p.title}</Link>
           ))}
         </div>
+
+        {/* Column 3: Programs B */}
         <div>
           <h4>More Programs</h4>
           {PROGRAMS.slice(4).map((p) => (
             <Link key={p.slug} to={`/programs/${p.slug}`}>{p.title}</Link>
           ))}
         </div>
+
+        {/* Column 4: Company */}
         <div>
           <h4>Company</h4>
           <Link to="/">Home</Link>
@@ -49,10 +59,13 @@ export default function SiteFooter() {
           <Link to="/about">About Us</Link>
           <Link to="/contact">Contact</Link>
         </div>
+
       </div>
+
       <div className="rb-footer-bottom">
-        © 2023 Nervescape Analytics · Empowering Innovation in Education · Admin → Teacher → Student, fully wired.
+        © 2023 Robo TinkerPreneur · Empowering Innovation in Education
       </div>
+      <div className="rb-footer-powered">Powered by : Nervescape Analytics</div>
     </footer>
   );
 }

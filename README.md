@@ -79,6 +79,15 @@ Open **http://localhost:8080**
 > Backend image listens on container port 4000, published to host **4001**.
 > nginx (frontend) serves the UI on **8080** and proxies `/api` to the backend.
 
+### 4. Public access (Cloudflare Tunnel, optional)
+
+```bash
+# Set CLOUDFLARE_TUNNEL_TOKEN in .env — see cloudflare/CLOUDFLARE.md
+bash scripts/compose.sh --profile cloudflare up -d
+```
+
+Full setup checklist and required Cloudflare values: **[cloudflare/CLOUDFLARE.md](cloudflare/CLOUDFLARE.md)**.
+
 ---
 
 ## Demo accounts
@@ -136,6 +145,7 @@ Any OpenAI-compatible endpoint works (set `AI_BASE_URL` accordingly).
 | `WEB_PORT`| `8080` | host port for the UI |
 | `JWT_SECRET` | … | **change in production** |
 | `AI_PROVIDER` | `offline` | `offline` or `openai` |
+| `CLOUDFLARE_TUNNEL_TOKEN` | (empty) | Cloudflare Tunnel token; use `--profile cloudflare` |
 
 ---
 

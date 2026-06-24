@@ -1,0 +1,14 @@
+# Optional override: run cloudflared with a local config + credentials file
+# instead of CLOUDFLARE_TUNNEL_TOKEN.
+#
+# Usage:
+#   cp cloudflare/config.yml.example cloudflare/config.yml
+#   # add credentials.json from Cloudflare dashboard / cloudflared CLI
+#   bash scripts/compose.sh -f docker-compose.yml -f docker-compose.cloudflare-config.yml --profile cloudflare up -d
+
+services:
+  cloudflared:
+    command: tunnel --no-autoupdate --config /etc/cloudflared/config.yml run
+    environment: {}
+    volumes:
+      - ./cloudflare:/etc/cloudflared:ro,Z

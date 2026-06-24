@@ -1,8 +1,10 @@
 import { useEffect, useState } from 'react';
+import type { ReactNode, CSSProperties } from 'react';
 import { apiGet, apiPost, apiPut, apiDel } from '../api';
 import Layout from '../components/Layout';
 import { useAuth } from '../auth';
 import { THEMES, getTheme, applyTheme, getBoolPref, setBoolPref, getPref, setPref } from '../theme';
+import Blocks from '../components/Blocks';
 
 export default function AdminPortal() {
   const [tab, setTab] = useState('overview');
@@ -18,17 +20,21 @@ export default function AdminPortal() {
       ]}
       tabs={[
         { key: 'overview', label: 'Control Center', icon: '🏠', group: 'Overview' },
-        { key: 'activity', label: 'Activity Feed', icon: '🕒', group: 'Overview' },
-        { key: 'courses', label: 'Courses', icon: '📚', group: 'Academics' },
+        { key: 'activity', label: 'Activity Feed', icon: '🕒', group: 'Governance' },
+        { key: 'curriculum', label: 'Curriculum Library', icon: '🗂️', group: 'Academics' },
+        { key: 'courses', label: 'Course Editor', icon: '📚', group: 'Academics' },
+        { key: 'classes', label: 'Classes', icon: '🏫', group: 'Academics' },
         { key: 'assignments', label: 'Assignments', icon: '🔗', group: 'Academics' },
+        { key: 'admins', label: 'Admins', icon: '🛡️', group: 'People' },
         { key: 'teachers', label: 'Teachers', icon: '👩‍🏫', group: 'People' },
         { key: 'students', label: 'Students', icon: '🎒', group: 'People' },
         { key: 'parents', label: 'Parents', icon: '👪', group: 'People' },
-        { key: 'schools', label: 'Schools', icon: '🏫', group: 'Operations' },
+        { key: 'schools', label: 'Schools', icon: '🏣', group: 'Operations' },
         { key: 'live', label: 'Live Classes', icon: '📡', group: 'Operations' },
         { key: 'finance', label: 'Finance', icon: '💰', group: 'Operations' },
         { key: 'reports', label: 'Reports', icon: '📈', group: 'Governance' },
-        { key: 'audit', label: 'Audit Log', icon: '🛡️', group: 'Governance' },
+        { key: 'audit', label: 'Audit Log', icon: '🔍', group: 'Governance' },
+        { key: 'roles', label: 'Teaching Roles', icon: '🎭', group: 'People' },
         { key: 'iam', label: 'Access Control', icon: '🔐', group: 'Governance' },
         { key: 'retention', label: 'Data Retention', icon: '🗄️', group: 'Governance' },
         { key: 'ai', label: 'AI Platform', icon: '🤖', group: 'System' },
@@ -36,7 +42,10 @@ export default function AdminPortal() {
     >
       {tab === 'overview' && <Overview go={setTab} />}
       {tab === 'activity' && <ActivityFeed />}
+      {tab === 'curriculum' && <CurriculumLibrary />}
       {tab === 'courses' && <Courses />}
+      {tab === 'classes' && <GradeManager />}
+      {tab === 'admins' && <AdminUsers />}
       {tab === 'teachers' && <Users role="teacher" />}
       {tab === 'students' && <Users role="student" />}
       {tab === 'parents' && <Parents />}
@@ -46,6 +55,7 @@ export default function AdminPortal() {
       {tab === 'finance' && <Finance />}
       {tab === 'reports' && <Reports />}
       {tab === 'audit' && <AuditLog />}
+      {tab === 'roles' && <TeachingRoles />}
       {tab === 'iam' && <IamMatrix />}
       {tab === 'retention' && <Retention />}
       {tab === 'ai' && <AiMonitor />}
@@ -170,6 +180,7 @@ function Users({ role }: { role: 'teacher' | 'student' }) {
   const [grades, setGrades] = useState<any[]>([]);
   const [show, setShow] = useState(false);
   const [editUser, setEditUser] = useState<any>(null);
+  const [classAccessUser, setClassAccessUser] = useState<any>(null);
   const [msg, setMsg] = useState('');
 
   function load() { apiGet<{ users: any[] }>(`/admin/users?role=${role}`).then((r) => setUsers(r.users)).catch(() => {}); }
@@ -198,6 +209,9 @@ function Users({ role }: { role: 'teacher' | 'student' }) {
                 <td><span className="tag" style={{ color: u.is_active ? 'var(--green)' : 'var(--pink)' }}>{u.is_active ? 'active' : 'disabled'}</span></td>
                 <td className="row" style={{ gap: 6 }}>
                   <button className="btn ghost sm" onClick={() => setEditUser(u)}>Edit Profile</button>
+                  {role === 'student' && (
+                    <button className="btn ghost sm" title="Manage class access" onClick={() => setClassAccessUser(u)}>🏫 Classes</button>
+                  )}
                   <button className="btn ghost sm" onClick={() => toggle(u)}>{u.is_active ? 'Disable' : 'Enable'}</button>
                   <button className="btn danger sm" onClick={() => del(u.id)}>Delete</button>
                 </td>
@@ -209,6 +223,281 @@ function Users({ role }: { role: 'teacher' | 'student' }) {
       </div>
       {show && <AddUser role={role} grades={grades} onClose={() => setShow(false)} onSaved={(m) => { setMsg(m); setShow(false); load(); }} />}
       {editUser && <EditProfile userId={editUser.id} name={editUser.full_name} grades={grades} onClose={() => setEditUser(null)} onSaved={() => { setEditUser(null); load(); setMsg('Profile updated.'); }} />}
+      {classAccessUser && (
+        <StudentClassAccessModal
+          student={classAccessUser}
+          allGrades={grades}
+          onClose={() => setClassAccessUser(null)}
+        />
+      )}
+    </div>
+  );
+}
+
+// Modal to grant / revoke extra class access for a student
+function StudentClassAccessModal({ student, allGrades, onClose }: { student: any; allGrades: any[]; onClose: () => void }) {
+  const [access, setAccess] = useState<any[]>([]);
+  const [selGrade, setSelGrade] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [msg, setMsg] = useState('');
+
+  useEffect(() => { loadAccess(); }, [student.id]);
+
+  function loadAccess() {
+    setLoading(true);
+    apiGet<any>(`/admin/students/${student.id}/grade-access`)
+      .then((r) => setAccess(r.access))
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  }
+
+  async function grant() {
+    if (!selGrade) return;
+    try {
+      await apiPost(`/admin/students/${student.id}/grade-access`, { grade_id: Number(selGrade) });
+      setMsg('Access granted.'); setSelGrade(''); loadAccess();
+    } catch (e: any) { setMsg(e.message || 'Failed'); }
+  }
+
+  async function revoke(gradeId: number) {
+    if (!confirm('Revoke access to this class?')) return;
+    await apiDel(`/admin/students/${student.id}/grade-access/${gradeId}`);
+    setMsg('Access revoked.'); loadAccess();
+  }
+
+  // Grades not yet granted and not the primary
+  const available = allGrades.filter((g) => g.id !== student.grade_id && !access.find((a) => a.grade_id === g.id));
+
+  return (
+    <div className="modal-bg" onClick={onClose}>
+      <div className="card pad modal" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 560 }}>
+        <div className="row between" style={{ marginBottom: 12 }}>
+          <div>
+            <h3 style={{ margin: 0 }}>🏫 Class Access — {student.full_name}</h3>
+            <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>
+              Primary class: <b>{student.grade_name || 'None'}</b>
+            </div>
+          </div>
+          <button className="modal-x" onClick={onClose}>✕</button>
+        </div>
+
+        {msg && <div className="card pad" style={{ borderColor: 'var(--green)', marginBottom: 10, fontSize: 13 }}>{msg}</div>}
+
+        <p className="muted" style={{ fontSize: 13, marginTop: 0 }}>
+          Grant this student read access to additional classes. They will see the extra classes in their profile.
+        </p>
+
+        {/* Grant new access */}
+        <div className="row" style={{ gap: 8, marginBottom: 14 }}>
+          <select value={selGrade} onChange={(e) => setSelGrade(e.target.value)} style={{ flex: 1 }}>
+            <option value="">— Select a class to grant access —</option>
+            {available.map((g) => <option key={g.id} value={g.id}>{g.name}</option>)}
+          </select>
+          <button className="btn" disabled={!selGrade} onClick={grant}>Grant Access</button>
+        </div>
+
+        {/* Current extra access */}
+        {loading && <div className="spinner" />}
+        {!loading && (
+          <div style={{ display: 'grid', gap: 6 }}>
+            {access.length === 0 && <div className="muted" style={{ fontSize: 13, padding: '8px 0' }}>No extra class access granted yet.</div>}
+            {access.map((a) => (
+              <div key={a.grade_id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 12px', borderRadius: 8, border: '1px solid var(--border)' }}>
+                <span>🏫</span>
+                <div style={{ flex: 1 }}>
+                  <b style={{ fontSize: 13 }}>{a.grade_name}</b>
+                  {a.granted_by_name && <span className="muted" style={{ fontSize: 11, marginLeft: 8 }}>granted by {a.granted_by_name}</span>}
+                </div>
+                <button className="btn danger sm" onClick={() => revoke(a.grade_id)}>Revoke</button>
+              </div>
+            ))}
+          </div>
+        )}
+
+        <div className="row" style={{ justifyContent: 'flex-end', marginTop: 16 }}>
+          <button className="btn ghost" onClick={onClose}>Close</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ---- Admin user management ----
+function AdminUsers() {
+  const { user: me } = useAuth();
+  const [users, setUsers] = useState<any[]>([]);
+  const [show, setShow] = useState(false);
+  const [msg, setMsg] = useState('');
+  const [name, setName] = useState('');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [err, setErr] = useState('');
+
+  function load() { apiGet<{ users: any[] }>('/admin/users?role=admin').then(r => setUsers(r.users)).catch(() => {}); }
+  useEffect(() => { load(); }, []);
+
+  async function del(id: string) {
+    if (!confirm('Delete this admin?')) return;
+    await apiDel(`/admin/users/${id}`); load();
+  }
+  async function toggle(u: any) { await apiPut(`/admin/users/${u.id}`, { is_active: !u.is_active }); load(); }
+
+  async function create() {
+    setErr('');
+    if (!name || !email) { setErr('Name and email are required'); return; }
+    try {
+      const r = await apiPost<any>('/admin/users', { role: 'admin', full_name: name, email, password: password || undefined });
+      setMsg(`Admin "${name}" created. ${r.defaultPassword ? `Default password: ${r.defaultPassword}` : 'Password set.'}`);
+      setShow(false); setName(''); setEmail(''); setPassword(''); load();
+    } catch (e: any) { setErr(e.message); }
+  }
+
+  return (
+    <div className="grid">
+      <div className="row between">
+        <h2 style={{ margin: 0 }}>Administrators</h2>
+        <button className="btn" onClick={() => { setShow(true); setErr(''); setMsg(''); }}>+ Add Admin</button>
+      </div>
+      {msg && <div className="card pad" style={{ borderColor: 'var(--green)' }}>{msg}</div>}
+      <div className="card pad">
+        <table>
+          <thead><tr><th>Name</th><th>Email</th><th>Status</th><th>Last login</th><th></th></tr></thead>
+          <tbody>
+            {users.map(u => (
+              <tr key={u.id}>
+                <td>{u.full_name} {u.id === me?.id && <span className="tag" style={{ color: 'var(--yellow)' }}>you</span>}</td>
+                <td>{u.email}</td>
+                <td><span className="tag" style={{ color: u.is_active ? 'var(--green)' : 'var(--pink)' }}>{u.is_active ? 'active' : 'disabled'}</span></td>
+                <td className="muted" style={{ fontSize: 13 }}>{u.last_login ? new Date(u.last_login).toLocaleDateString() : 'never'}</td>
+                <td className="row" style={{ gap: 6 }}>
+                  {u.id !== me?.id && <>
+                    <button className="btn ghost sm" onClick={() => toggle(u)}>{u.is_active ? 'Disable' : 'Enable'}</button>
+                    <button className="btn danger sm" onClick={() => del(u.id)}>Delete</button>
+                  </>}
+                </td>
+              </tr>
+            ))}
+            {users.length === 0 && <tr><td colSpan={5} className="muted">No admins yet.</td></tr>}
+          </tbody>
+        </table>
+      </div>
+      {show && (
+        <div className="modal-bg" onClick={() => setShow(false)}>
+          <div className="card pad modal" onClick={e => e.stopPropagation()}>
+            <h3 style={{ marginTop: 0 }}>Add Administrator</h3>
+            {err && <div className="err" style={{ marginBottom: 10 }}>{err}</div>}
+            <div className="field"><label>Full name</label><input value={name} onChange={e => setName(e.target.value)} /></div>
+            <div className="field"><label>Email</label><input type="email" value={email} onChange={e => setEmail(e.target.value)} /></div>
+            <div className="field"><label>Password <span className="muted" style={{ fontSize: 12 }}>(leave blank for default: Admin@2026)</span></label>
+              <input type="password" value={password} onChange={e => setPassword(e.target.value)} placeholder="Min 6 characters" />
+            </div>
+            <div className="row between" style={{ marginTop: 8 }}>
+              <button className="btn ghost" onClick={() => setShow(false)}>Cancel</button>
+              <button className="btn" onClick={create}>Create Admin</button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ---- Grade / Class management ----
+function GradeManager() {
+  const [grades, setGrades] = useState<any[]>([]);
+  const [showAdd, setShowAdd] = useState(false);
+  const [form, setForm] = useState({ number: 8, name: 'Class 8', level_label: '', description: '' });
+  const [err, setErr] = useState('');
+  const [msg, setMsg] = useState('');
+
+  function load() { apiGet<{ grades: any[] }>('/admin/grades').then(r => setGrades(r.grades)).catch(() => {}); }
+  useEffect(() => { load(); }, []);
+
+  async function toggle(g: any) {
+    await apiPut(`/admin/grades/${g.id}`, { is_active: !g.is_active });
+    load();
+  }
+
+  async function activate(g: any) {
+    await apiPost('/admin/grades', { number: g.number, name: g.name, is_active: true });
+    setMsg(`${g.name} activated.`); load();
+  }
+
+  async function addNew() {
+    setErr('');
+    if (!form.name || form.number < 1 || form.number > 12) { setErr('Valid class number (1-12) and name are required.'); return; }
+    try {
+      await apiPost('/admin/grades', form);
+      setMsg(`${form.name} created / activated.`); setShowAdd(false); load();
+    } catch (e: any) { setErr(e.message); }
+  }
+
+  const inactive = grades.filter(g => !g.is_active);
+  const active = grades.filter(g => g.is_active);
+
+  return (
+    <div className="grid">
+      <div className="row between">
+        <h2 style={{ margin: 0 }}>Class Management</h2>
+        <button className="btn" onClick={() => { setShowAdd(true); setErr(''); }}>+ Add Class</button>
+      </div>
+      {msg && <div className="card pad" style={{ borderColor: 'var(--green)' }}>{msg}</div>}
+
+      <Panel title="Active Classes" icon="✅" sub="Classes visible to teachers and students with curriculum attached">
+        <table>
+          <thead><tr><th>Class</th><th>Level</th><th>Modules</th><th>Chapters</th><th>Students</th><th></th></tr></thead>
+          <tbody>
+            {active.map(g => (
+              <tr key={g.id}>
+                <td><b>{g.name}</b></td>
+                <td className="muted">{g.level_label || '—'}</td>
+                <td>{g.modules}</td>
+                <td>{g.chapters}</td>
+                <td>{g.students}</td>
+                <td><button className="btn ghost sm" onClick={() => toggle(g)}>Deactivate</button></td>
+              </tr>
+            ))}
+            {active.length === 0 && <tr><td colSpan={6} className="muted">No active classes.</td></tr>}
+          </tbody>
+        </table>
+      </Panel>
+
+      {inactive.length > 0 && (
+        <Panel title="Inactive / Placeholder Classes" icon="🔒" sub="Activate to make available for course creation and enrollment">
+          <table>
+            <thead><tr><th>Class</th><th>Level</th><th></th></tr></thead>
+            <tbody>
+              {inactive.map(g => (
+                <tr key={g.id}>
+                  <td>{g.name}</td>
+                  <td className="muted">{g.level_label || '—'}</td>
+                  <td><button className="btn sm" onClick={() => activate(g)}>Activate</button></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </Panel>
+      )}
+
+      {showAdd && (
+        <div className="modal-bg" onClick={() => setShowAdd(false)}>
+          <div className="card pad modal" onClick={e => e.stopPropagation()}>
+            <h3 style={{ marginTop: 0 }}>Add / Activate Class</h3>
+            {err && <div className="err" style={{ marginBottom: 10 }}>{err}</div>}
+            <div className="field">
+              <label>Class Number (1–12)</label>
+              <input type="number" min={1} max={12} value={form.number} onChange={e => setForm(f => ({ ...f, number: Number(e.target.value), name: `Class ${e.target.value}` }))} />
+            </div>
+            <div className="field"><label>Class Name</label><input value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} /></div>
+            <div className="field"><label>Level label (e.g. Level III ATL)</label><input value={form.level_label} onChange={e => setForm(f => ({ ...f, level_label: e.target.value }))} placeholder="Optional" /></div>
+            <div className="field"><label>Description</label><input value={form.description} onChange={e => setForm(f => ({ ...f, description: e.target.value }))} placeholder="Optional" /></div>
+            <div className="row between" style={{ marginTop: 8 }}>
+              <button className="btn ghost" onClick={() => setShowAdd(false)}>Cancel</button>
+              <button className="btn" onClick={addNew}>Create / Activate</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -683,6 +972,8 @@ function Courses() {
   const [modules, setModules] = useState<any[]>([]);
   const [editMod, setEditMod] = useState<any | null>(null);
   const [editChap, setEditChap] = useState<any | null>(null);
+  const [viewChap, setViewChap] = useState<any | null>(null);
+  const [editContent, setEditContent] = useState<any | null>(null);
   const [newModFor, setNewModFor] = useState<number | null>(null);
   const [newChapFor, setNewChapFor] = useState<number | null>(null);
   const [msg, setMsg] = useState('');
@@ -722,6 +1013,13 @@ function Courses() {
   async function togglePublished(c: any) {
     try { await apiPut(`/admin/chapters/${c.id}`, { is_published: !c.is_published }); if (selGrade) loadModules(selGrade); }
     catch (e: any) { alert(e?.message || 'Toggle failed'); }
+  }
+  async function saveContent(chapterId: number, blocks: any[]) {
+    try {
+      await apiPut(`/admin/chapters/${chapterId}`, { content: blocks });
+      flash('Chapter content saved.'); if (selGrade) loadModules(selGrade);
+      setEditContent(null);
+    } catch (e: any) { alert(e?.message || 'Save failed'); }
   }
 
   return (
@@ -778,7 +1076,9 @@ function Courses() {
                   </td>
                   <td>
                     <div className="row" style={{ gap: 4 }}>
-                      <button className="btn ghost sm" onClick={() => setEditChap({ ...c, module_id: m.id })}>✏️</button>
+                      <button className="btn ghost sm" title="View chapter (read mode)" onClick={() => setViewChap(c)}>👁</button>
+                      <button className="btn ghost sm" title="Edit metadata" onClick={() => setEditChap({ ...c, module_id: m.id })}>✏️</button>
+                      <button className="btn ghost sm" title="Edit content blocks" onClick={() => setEditContent({ ...c, module_id: m.id })}>📝</button>
                       <button className="btn danger sm" onClick={() => deleteChapter(c.id, c.title)}>🗑</button>
                     </div>
                   </td>
@@ -805,6 +1105,14 @@ function Courses() {
           initial={editChap || { module_id: newChapFor, title: '', summary: '', difficulty: 'beginner', est_minutes: 60 }}
           onClose={() => { setEditChap(null); setNewChapFor(null); }}
           onSave={saveChapter}
+        />
+      )}
+      {viewChap && <ChapterViewer chapterId={viewChap.id} onClose={() => setViewChap(null)} />}
+      {editContent && (
+        <ChapterContentEditor
+          chapter={editContent}
+          onClose={() => setEditContent(null)}
+          onSave={(blocks) => saveContent(editContent.id, blocks)}
         />
       )}
     </div>
@@ -845,7 +1153,7 @@ function ChapterEditor({ initial, onClose, onSave }: { initial: any; onClose: ()
           <h3 style={{ margin: 0 }}>{d.id ? '✏️ Edit Chapter' : '➕ New Chapter'}</h3>
           <button className="btn ghost sm" onClick={onClose}>✕</button>
         </div>
-        <p className="muted" style={{ fontSize: 12, marginTop: 0 }}>Rich block content (lessons, code, images) is edited from the Teacher portal. Here you manage the chapter's metadata and lifecycle.</p>
+        <p className="muted" style={{ fontSize: 12, marginTop: 0 }}>This dialog manages the chapter's metadata and lifecycle. To author the rich lesson content (text, images, code, activities, quizzes…), use the <b>📝 Content</b> button on the chapter row.</p>
         <div className="grid2" style={{ gap: 10 }}>
           <div className="field" style={{ gridColumn: '1 / span 2' }}><label>Title</label><input value={d.title || ''} onChange={(e) => setD({ ...d, title: e.target.value })} /></div>
           <div className="field" style={{ gridColumn: '1 / span 2' }}><label>Summary</label><textarea rows={3} value={d.summary || ''} onChange={(e) => setD({ ...d, summary: e.target.value })} /></div>
@@ -869,6 +1177,450 @@ function ChapterEditor({ initial, onClose, onSave }: { initial: any; onClose: ()
         <div className="row" style={{ gap: 8, marginTop: 14 }}>
           <button className="btn" disabled={!d.title || !d.module_id} onClick={() => onSave(d)}>{d.id ? 'Save Changes' : 'Create Chapter'}</button>
           <button className="btn ghost" onClick={onClose}>Cancel</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Chapter Viewer ────────────────────────────────────────────────────────────
+// Renders the full rich-block content of a chapter exactly as students see it.
+function ChapterViewer({ chapterId, onClose }: { chapterId: number; onClose: () => void }) {
+  const [data, setData] = useState<any>(null);
+  useEffect(() => {
+    apiGet<any>(`/content/chapters/${chapterId}`).then(setData).catch(() => {});
+  }, [chapterId]);
+
+  return (
+    <div className="modal-bg" onClick={onClose}>
+      <div
+        className="card pad modal"
+        onClick={(e) => e.stopPropagation()}
+        style={{ maxWidth: 860, maxHeight: '92vh', overflowY: 'auto', padding: 24 }}
+      >
+        <div className="row between" style={{ marginBottom: 12, alignItems: 'flex-start' }}>
+          <div>
+            {data && (
+              <div className="muted" style={{ fontSize: 12, marginBottom: 4 }}>
+                {data.chapter.grade_name} · {data.chapter.module_title}
+              </div>
+            )}
+            <h2 style={{ margin: 0 }}>{data?.chapter?.title || 'Loading…'}</h2>
+            {data && (
+              <div className="row" style={{ gap: 8, marginTop: 6 }}>
+                <span className={`tag ${data.chapter.difficulty}`}>{data.chapter.difficulty}</span>
+                <span className="muted" style={{ fontSize: 12 }}>⏱ {data.chapter.est_minutes} min</span>
+                <span className={`tag ${data.chapter.is_published ? '' : 'ghost'}`}>
+                  {data.chapter.is_published ? '✓ Published' : '◌ Draft'}
+                </span>
+              </div>
+            )}
+          </div>
+          <button className="modal-x" onClick={onClose}>✕</button>
+        </div>
+
+        {!data && <div className="spinner" />}
+
+        {data && (
+          <>
+            {data.chapter.summary && (
+              <p className="muted" style={{ fontSize: 13, marginTop: 0, borderBottom: '1px solid var(--border)', paddingBottom: 12 }}>
+                {data.chapter.summary}
+              </p>
+            )}
+            <Blocks blocks={Array.isArray(data.chapter.content) ? data.chapter.content : []} />
+            {data.facts && data.facts.length > 0 && (
+              <div style={{ marginTop: 16, paddingTop: 12, borderTop: '1px solid var(--border)' }}>
+                <h3 style={{ marginTop: 0 }}>💡 Did you know?</h3>
+                <ul>{data.facts.map((f: any) => <li key={f.id} style={{ lineHeight: 1.8 }}>{f.text}</li>)}</ul>
+              </div>
+            )}
+          </>
+        )}
+
+        <div className="row" style={{ justifyContent: 'flex-end', marginTop: 20, paddingTop: 12, borderTop: '1px solid var(--border)' }}>
+          <button className="btn ghost" onClick={onClose}>Close</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// RICH VISUAL CHAPTER CONTENT EDITOR
+// A modern block-based editor: add / edit / reorder / duplicate / delete content
+// blocks with friendly per-type forms, a live preview, and an advanced JSON mode.
+// ══════════════════════════════════════════════════════════════════════════════
+
+// ---- small helpers for list<->lines conversion ----
+const linesToArr = (s: string): string[] => s.split('\n').map((x) => x.trim()).filter(Boolean);
+const arrToLines = (a?: string[]): string => (a || []).join('\n');
+
+// Block type catalogue used by the "Add block" palette.
+const BLOCK_TYPES: { type: string; label: string; icon: string; make: () => any }[] = [
+  { type: 'heading', label: 'Heading', icon: '🔠', make: () => ({ type: 'heading', level: 2, text: 'New heading' }) },
+  { type: 'paragraph', label: 'Paragraph', icon: '¶', make: () => ({ type: 'paragraph', text: 'Write your text here…' }) },
+  { type: 'callout', label: 'Callout', icon: '💡', make: () => ({ type: 'callout', variant: 'tip', title: 'Tip', text: 'Highlighted note…' }) },
+  { type: 'list', label: 'Bullet list', icon: '•', make: () => ({ type: 'list', title: '', items: ['First item', 'Second item'] }) },
+  { type: 'steps', label: 'Numbered steps', icon: '🔢', make: () => ({ type: 'steps', title: 'Steps', items: ['Step one', 'Step two'] }) },
+  { type: 'image', label: 'Image', icon: '🖼️', make: () => ({ type: 'image', url: '', caption: '' }) },
+  { type: 'code', label: 'Code', icon: '💻', make: () => ({ type: 'code', language: 'python', code: '# code here', note: '' }) },
+  { type: 'example', label: 'Example', icon: '📌', make: () => ({ type: 'example', title: 'Example', text: '' }) },
+  { type: 'analogy', label: 'Analogy', icon: '🔗', make: () => ({ type: 'analogy', concept: '', analogy: '', explanation: '' }) },
+  { type: 'mistake', label: 'Common mistake', icon: '⚠️', make: () => ({ type: 'mistake', mistake: '', why: '', fix: '' }) },
+  { type: 'troubleshoot', label: 'Troubleshoot', icon: '🔧', make: () => ({ type: 'troubleshoot', problem: '', cause: '', fix: '' }) },
+  { type: 'activity', label: 'Activity', icon: '🧪', make: () => ({ type: 'activity', title: 'Activity', duration: '20 minutes', materials: [], steps: [], expected: '' }) },
+  { type: 'miniproject', label: 'Mini project', icon: '🚀', make: () => ({ type: 'miniproject', title: 'Mini Project', description: '', time: '30 minutes', materials: [], steps: [], expectedOutput: '', extensions: [] }) },
+  { type: 'industry', label: 'Industry case', icon: '🏭', make: () => ({ type: 'industry', company: '', useCase: '', impact: '' }) },
+  { type: 'quiz', label: 'Quiz', icon: '❓', make: () => ({ type: 'quiz', questions: [{ qtype: 'mcq', prompt: '', options: ['', ''], answer: '', explanation: '', difficulty: 'beginner' }] }) },
+  { type: 'figure', label: 'Figure (SVG)', icon: '📐', make: () => ({ type: 'figure', svg: '', caption: '' }) },
+];
+
+function Lbl({ children }: { children: ReactNode }) {
+  return <label style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.5, color: 'var(--muted)', display: 'block', marginBottom: 3 }}>{children}</label>;
+}
+const inputStyle: CSSProperties = { width: '100%', padding: '7px 10px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--card,#fff)', color: 'inherit', fontSize: 13 };
+
+// Editor for a single block, dispatched by type.
+function BlockFields({ block, onChange }: { block: any; onChange: (b: any) => void }) {
+  const set = (patch: any) => onChange({ ...block, ...patch });
+  switch (block.type) {
+    case 'heading':
+      return (
+        <div className="grid2" style={{ gap: 8 }}>
+          <div><Lbl>Level</Lbl>
+            <select style={inputStyle} value={block.level || 2} onChange={(e) => set({ level: Number(e.target.value) })}>
+              <option value={1}>H1 (title)</option><option value={2}>H2 (section)</option><option value={3}>H3 (sub)</option>
+            </select>
+          </div>
+          <div style={{ gridColumn: '1 / span 2' }}><Lbl>Text</Lbl><input style={inputStyle} value={block.text || ''} onChange={(e) => set({ text: e.target.value })} /></div>
+        </div>
+      );
+    case 'paragraph':
+      return <div><Lbl>Text</Lbl><textarea style={{ ...inputStyle, minHeight: 80 }} value={block.text || ''} onChange={(e) => set({ text: e.target.value })} /></div>;
+    case 'callout':
+      return (
+        <div className="grid" style={{ gap: 8 }}>
+          <div className="grid2" style={{ gap: 8 }}>
+            <div><Lbl>Variant</Lbl>
+              <select style={inputStyle} value={block.variant || 'tip'} onChange={(e) => set({ variant: e.target.value })}>
+                {['tip', 'concept', 'logic', 'realworld', 'warning', 'curiosity', 'objective', 'story', 'industry', 'project', 'revision'].map((v) => <option key={v} value={v}>{v}</option>)}
+              </select>
+            </div>
+            <div><Lbl>Title</Lbl><input style={inputStyle} value={block.title || ''} onChange={(e) => set({ title: e.target.value })} /></div>
+          </div>
+          <div><Lbl>Text</Lbl><textarea style={{ ...inputStyle, minHeight: 70 }} value={block.text || ''} onChange={(e) => set({ text: e.target.value })} /></div>
+        </div>
+      );
+    case 'list':
+    case 'steps':
+      return (
+        <div className="grid" style={{ gap: 8 }}>
+          <div><Lbl>Title (optional)</Lbl><input style={inputStyle} value={block.title || ''} onChange={(e) => set({ title: e.target.value })} /></div>
+          <div><Lbl>Items (one per line)</Lbl><textarea style={{ ...inputStyle, minHeight: 90 }} value={arrToLines(block.items)} onChange={(e) => set({ items: linesToArr(e.target.value) })} /></div>
+        </div>
+      );
+    case 'image':
+      return (
+        <div className="grid" style={{ gap: 8 }}>
+          <div><Lbl>Image URL</Lbl><input style={inputStyle} value={block.url || ''} onChange={(e) => set({ url: e.target.value })} placeholder="https://… or data:image/png;base64,…" /></div>
+          <div><Lbl>Caption</Lbl><input style={inputStyle} value={block.caption || ''} onChange={(e) => set({ caption: e.target.value })} /></div>
+          {block.url && <img src={block.url} alt="" style={{ maxWidth: 200, borderRadius: 8 }} />}
+        </div>
+      );
+    case 'code':
+      return (
+        <div className="grid" style={{ gap: 8 }}>
+          <div className="grid2" style={{ gap: 8 }}>
+            <div><Lbl>Language</Lbl><input style={inputStyle} value={block.language || ''} onChange={(e) => set({ language: e.target.value })} /></div>
+            <div><Lbl>Note (optional)</Lbl><input style={inputStyle} value={block.note || ''} onChange={(e) => set({ note: e.target.value })} /></div>
+          </div>
+          <div><Lbl>Code</Lbl><textarea style={{ ...inputStyle, minHeight: 120, fontFamily: 'ui-monospace, monospace' }} value={block.code || ''} onChange={(e) => set({ code: e.target.value })} spellCheck={false} /></div>
+        </div>
+      );
+    case 'example':
+      return (
+        <div className="grid" style={{ gap: 8 }}>
+          <div><Lbl>Title</Lbl><input style={inputStyle} value={block.title || ''} onChange={(e) => set({ title: e.target.value })} /></div>
+          <div><Lbl>Text</Lbl><textarea style={{ ...inputStyle, minHeight: 70 }} value={block.text || ''} onChange={(e) => set({ text: e.target.value })} /></div>
+        </div>
+      );
+    case 'analogy':
+      return (
+        <div className="grid" style={{ gap: 8 }}>
+          <div><Lbl>Concept</Lbl><input style={inputStyle} value={block.concept || ''} onChange={(e) => set({ concept: e.target.value })} /></div>
+          <div><Lbl>Analogy (think of it like…)</Lbl><input style={inputStyle} value={block.analogy || ''} onChange={(e) => set({ analogy: e.target.value })} /></div>
+          <div><Lbl>Explanation</Lbl><textarea style={{ ...inputStyle, minHeight: 60 }} value={block.explanation || ''} onChange={(e) => set({ explanation: e.target.value })} /></div>
+        </div>
+      );
+    case 'mistake':
+      return (
+        <div className="grid" style={{ gap: 8 }}>
+          <div><Lbl>Mistake</Lbl><input style={inputStyle} value={block.mistake || ''} onChange={(e) => set({ mistake: e.target.value })} /></div>
+          <div><Lbl>Why it happens</Lbl><textarea style={{ ...inputStyle, minHeight: 50 }} value={block.why || ''} onChange={(e) => set({ why: e.target.value })} /></div>
+          <div><Lbl>Fix</Lbl><textarea style={{ ...inputStyle, minHeight: 50 }} value={block.fix || ''} onChange={(e) => set({ fix: e.target.value })} /></div>
+        </div>
+      );
+    case 'troubleshoot':
+      return (
+        <div className="grid" style={{ gap: 8 }}>
+          <div><Lbl>Problem</Lbl><input style={inputStyle} value={block.problem || ''} onChange={(e) => set({ problem: e.target.value })} /></div>
+          <div><Lbl>Cause</Lbl><textarea style={{ ...inputStyle, minHeight: 50 }} value={block.cause || ''} onChange={(e) => set({ cause: e.target.value })} /></div>
+          <div><Lbl>Fix</Lbl><textarea style={{ ...inputStyle, minHeight: 50 }} value={block.fix || ''} onChange={(e) => set({ fix: e.target.value })} /></div>
+        </div>
+      );
+    case 'activity':
+      return (
+        <div className="grid" style={{ gap: 8 }}>
+          <div className="grid2" style={{ gap: 8 }}>
+            <div><Lbl>Title</Lbl><input style={inputStyle} value={block.title || ''} onChange={(e) => set({ title: e.target.value })} /></div>
+            <div><Lbl>Duration</Lbl><input style={inputStyle} value={block.duration || ''} onChange={(e) => set({ duration: e.target.value })} /></div>
+          </div>
+          <div><Lbl>Materials (one per line)</Lbl><textarea style={{ ...inputStyle, minHeight: 60 }} value={arrToLines(block.materials)} onChange={(e) => set({ materials: linesToArr(e.target.value) })} /></div>
+          <div><Lbl>Steps (one per line)</Lbl><textarea style={{ ...inputStyle, minHeight: 80 }} value={arrToLines(block.steps)} onChange={(e) => set({ steps: linesToArr(e.target.value) })} /></div>
+          <div><Lbl>Expected result</Lbl><textarea style={{ ...inputStyle, minHeight: 50 }} value={block.expected || ''} onChange={(e) => set({ expected: e.target.value })} /></div>
+        </div>
+      );
+    case 'miniproject':
+      return (
+        <div className="grid" style={{ gap: 8 }}>
+          <div className="grid2" style={{ gap: 8 }}>
+            <div><Lbl>Title</Lbl><input style={inputStyle} value={block.title || ''} onChange={(e) => set({ title: e.target.value })} /></div>
+            <div><Lbl>Time</Lbl><input style={inputStyle} value={block.time || ''} onChange={(e) => set({ time: e.target.value })} /></div>
+          </div>
+          <div><Lbl>Description</Lbl><textarea style={{ ...inputStyle, minHeight: 60 }} value={block.description || ''} onChange={(e) => set({ description: e.target.value })} /></div>
+          <div><Lbl>Materials (one per line)</Lbl><textarea style={{ ...inputStyle, minHeight: 50 }} value={arrToLines(block.materials)} onChange={(e) => set({ materials: linesToArr(e.target.value) })} /></div>
+          <div><Lbl>Steps (one per line)</Lbl><textarea style={{ ...inputStyle, minHeight: 70 }} value={arrToLines(block.steps)} onChange={(e) => set({ steps: linesToArr(e.target.value) })} /></div>
+          <div><Lbl>Expected output</Lbl><textarea style={{ ...inputStyle, minHeight: 50 }} value={block.expectedOutput || ''} onChange={(e) => set({ expectedOutput: e.target.value })} /></div>
+          <div><Lbl>Extensions (one per line)</Lbl><textarea style={{ ...inputStyle, minHeight: 50 }} value={arrToLines(block.extensions)} onChange={(e) => set({ extensions: linesToArr(e.target.value) })} /></div>
+        </div>
+      );
+    case 'industry':
+      return (
+        <div className="grid" style={{ gap: 8 }}>
+          <div><Lbl>Company</Lbl><input style={inputStyle} value={block.company || ''} onChange={(e) => set({ company: e.target.value })} /></div>
+          <div><Lbl>Use case</Lbl><textarea style={{ ...inputStyle, minHeight: 50 }} value={block.useCase || ''} onChange={(e) => set({ useCase: e.target.value })} /></div>
+          <div><Lbl>Impact</Lbl><input style={inputStyle} value={block.impact || ''} onChange={(e) => set({ impact: e.target.value })} /></div>
+        </div>
+      );
+    case 'figure':
+      return (
+        <div className="grid" style={{ gap: 8 }}>
+          <div><Lbl>SVG markup</Lbl><textarea style={{ ...inputStyle, minHeight: 100, fontFamily: 'ui-monospace, monospace' }} value={block.svg || ''} onChange={(e) => set({ svg: e.target.value })} spellCheck={false} /></div>
+          <div><Lbl>Caption</Lbl><input style={inputStyle} value={block.caption || ''} onChange={(e) => set({ caption: e.target.value })} /></div>
+        </div>
+      );
+    case 'quiz':
+      return <QuizFields block={block} onChange={onChange} />;
+    default:
+      return (
+        <div>
+          <Lbl>Raw JSON for this block</Lbl>
+          <textarea
+            style={{ ...inputStyle, minHeight: 100, fontFamily: 'ui-monospace, monospace' }}
+            defaultValue={JSON.stringify(block, null, 2)}
+            onBlur={(e) => { try { onChange(JSON.parse(e.target.value)); } catch { /* ignore */ } }}
+          />
+        </div>
+      );
+  }
+}
+
+function QuizFields({ block, onChange }: { block: any; onChange: (b: any) => void }) {
+  const questions: any[] = block.questions || [];
+  const setQ = (i: number, patch: any) => {
+    const next = questions.map((q, idx) => (idx === i ? { ...q, ...patch } : q));
+    onChange({ ...block, questions: next });
+  };
+  const addQ = () => onChange({ ...block, questions: [...questions, { qtype: 'mcq', prompt: '', options: ['', ''], answer: '', explanation: '', difficulty: 'beginner' }] });
+  const delQ = (i: number) => onChange({ ...block, questions: questions.filter((_, idx) => idx !== i) });
+
+  return (
+    <div className="grid" style={{ gap: 10 }}>
+      {questions.map((q, i) => (
+        <div key={i} style={{ border: '1px solid var(--border)', borderRadius: 8, padding: 10 }}>
+          <div className="row between" style={{ marginBottom: 6 }}>
+            <b style={{ fontSize: 12 }}>Question {i + 1}</b>
+            <button className="btn danger sm" onClick={() => delQ(i)}>🗑</button>
+          </div>
+          <div className="grid2" style={{ gap: 8, marginBottom: 6 }}>
+            <div><Lbl>Type</Lbl>
+              <select style={inputStyle} value={q.qtype || 'mcq'} onChange={(e) => setQ(i, { qtype: e.target.value })}>
+                {['mcq', 'oneliner', 'brain_teaser', 'tinkering', 'computational', 'logical'].map((t) => <option key={t} value={t}>{t}</option>)}
+              </select>
+            </div>
+            <div><Lbl>Difficulty</Lbl>
+              <select style={inputStyle} value={q.difficulty || 'beginner'} onChange={(e) => setQ(i, { difficulty: e.target.value })}>
+                {['beginner', 'intermediate', 'advanced'].map((t) => <option key={t} value={t}>{t}</option>)}
+              </select>
+            </div>
+          </div>
+          <div style={{ marginBottom: 6 }}><Lbl>Prompt</Lbl><textarea style={{ ...inputStyle, minHeight: 50 }} value={q.prompt || ''} onChange={(e) => setQ(i, { prompt: e.target.value })} /></div>
+          <div style={{ marginBottom: 6 }}><Lbl>Options (one per line — leave blank for open-ended)</Lbl><textarea style={{ ...inputStyle, minHeight: 50 }} value={arrToLines(q.options)} onChange={(e) => setQ(i, { options: linesToArr(e.target.value) })} /></div>
+          <div className="grid2" style={{ gap: 8 }}>
+            <div><Lbl>Answer</Lbl><input style={inputStyle} value={q.answer || ''} onChange={(e) => setQ(i, { answer: e.target.value })} /></div>
+            <div><Lbl>Explanation</Lbl><input style={inputStyle} value={q.explanation || ''} onChange={(e) => setQ(i, { explanation: e.target.value })} /></div>
+          </div>
+        </div>
+      ))}
+      <button className="btn ghost sm" onClick={addQ} style={{ justifySelf: 'start' }}>➕ Add question</button>
+    </div>
+  );
+}
+
+// One collapsible/editable block card with reorder + duplicate + delete controls.
+function BlockCard({ block, index, total, onChange, onMove, onDuplicate, onDelete }: {
+  block: any; index: number; total: number;
+  onChange: (b: any) => void; onMove: (dir: -1 | 1) => void; onDuplicate: () => void; onDelete: () => void;
+}) {
+  const [open, setOpen] = useState(true);
+  const meta = BLOCK_TYPES.find((b) => b.type === block.type);
+  const titlePreview = block.text || block.title || block.prompt || block.concept || block.problem || block.mistake || block.company || (block.questions ? `${block.questions.length} question(s)` : block.type);
+  return (
+    <div className="card" style={{ padding: 0, overflow: 'hidden', border: '1px solid var(--border)' }}>
+      <div className="row between" style={{ padding: '8px 12px', background: 'rgba(99,102,241,0.06)', gap: 8 }}>
+        <button className="btn ghost sm" onClick={() => setOpen((o) => !o)} style={{ flex: 1, textAlign: 'left', justifyContent: 'flex-start' }}>
+          <span style={{ marginRight: 8 }}>{meta?.icon || '📦'}</span>
+          <b style={{ fontSize: 13, textTransform: 'capitalize' }}>{block.type}</b>
+          <span className="muted" style={{ fontSize: 12, marginLeft: 8, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 280, display: 'inline-block', verticalAlign: 'bottom' }}>
+            {typeof titlePreview === 'string' ? titlePreview.slice(0, 60) : ''}
+          </span>
+        </button>
+        <div className="row" style={{ gap: 3 }}>
+          <button className="btn ghost sm" title="Move up" disabled={index === 0} onClick={() => onMove(-1)}>↑</button>
+          <button className="btn ghost sm" title="Move down" disabled={index === total - 1} onClick={() => onMove(1)}>↓</button>
+          <button className="btn ghost sm" title="Duplicate" onClick={onDuplicate}>⧉</button>
+          <button className="btn danger sm" title="Delete" onClick={onDelete}>🗑</button>
+        </div>
+      </div>
+      {open && <div style={{ padding: 12 }}><BlockFields block={block} onChange={onChange} /></div>}
+    </div>
+  );
+}
+
+function ChapterContentEditor({ chapter, onClose, onSave }: { chapter: any; onClose: () => void; onSave: (blocks: any[]) => void }) {
+  const [loaded, setLoaded] = useState(false);
+  const [blocks, setBlocks] = useState<any[]>([]);
+  const [mode, setMode] = useState<'visual' | 'preview' | 'json'>('visual');
+  const [saving, setSaving] = useState(false);
+  const [showPalette, setShowPalette] = useState(false);
+  const [json, setJson] = useState('');
+  const [jsonErr, setJsonErr] = useState('');
+
+  useEffect(() => {
+    apiGet<any>(`/content/chapters/${chapter.id}`).then((d) => {
+      const b = Array.isArray(d.chapter.content) ? d.chapter.content : [];
+      setBlocks(b); setJson(JSON.stringify(b, null, 2)); setLoaded(true);
+    }).catch(() => setLoaded(true));
+  }, [chapter.id]);
+
+  function updateBlock(i: number, b: any) { setBlocks((prev) => prev.map((x, idx) => (idx === i ? b : x))); }
+  function moveBlock(i: number, dir: -1 | 1) {
+    setBlocks((prev) => {
+      const j = i + dir; if (j < 0 || j >= prev.length) return prev;
+      const next = [...prev]; [next[i], next[j]] = [next[j], next[i]]; return next;
+    });
+  }
+  function duplicateBlock(i: number) { setBlocks((prev) => { const next = [...prev]; next.splice(i + 1, 0, JSON.parse(JSON.stringify(prev[i]))); return next; }); }
+  function deleteBlock(i: number) { setBlocks((prev) => prev.filter((_, idx) => idx !== i)); }
+  function addBlock(maker: () => any) { setBlocks((prev) => [...prev, maker()]); setShowPalette(false); }
+
+  function switchMode(next: 'visual' | 'preview' | 'json') {
+    if (mode === 'json' && next !== 'json') {
+      // sync json -> blocks
+      try { const parsed = JSON.parse(json); if (Array.isArray(parsed)) { setBlocks(parsed); setJsonErr(''); } else { setJsonErr('Must be an array'); return; } }
+      catch (e: any) { setJsonErr(e.message); return; }
+    }
+    if (next === 'json') setJson(JSON.stringify(blocks, null, 2));
+    setMode(next);
+  }
+
+  async function handleSave() {
+    let finalBlocks = blocks;
+    if (mode === 'json') {
+      try { const parsed = JSON.parse(json); if (!Array.isArray(parsed)) { setJsonErr('Must be an array'); return; } finalBlocks = parsed; }
+      catch (e: any) { setJsonErr(e.message); return; }
+    }
+    setSaving(true);
+    try { await onSave(finalBlocks); } finally { setSaving(false); }
+  }
+
+  return (
+    <div className="modal-bg" onClick={onClose}>
+      <div className="card modal" onClick={(e) => e.stopPropagation()}
+        style={{ maxWidth: 1080, width: '96vw', maxHeight: '94vh', display: 'flex', flexDirection: 'column', padding: 0, overflow: 'hidden' }}>
+        {/* Header */}
+        <div className="row between" style={{ padding: '14px 20px', borderBottom: '1px solid var(--border)', flexShrink: 0 }}>
+          <div>
+            <h3 style={{ margin: 0 }}>📝 Content Studio — {chapter.title}</h3>
+            <div className="muted" style={{ fontSize: 12, marginTop: 3 }}>{blocks.length} blocks · drag-free reorder, friendly forms & live preview</div>
+          </div>
+          <button className="modal-x" onClick={onClose}>✕</button>
+        </div>
+
+        {/* Toolbar */}
+        <div className="row between" style={{ padding: '8px 20px', borderBottom: '1px solid var(--border)', gap: 8, flexShrink: 0, flexWrap: 'wrap' }}>
+          <div className="row" style={{ gap: 6 }}>
+            {(['visual', 'preview', 'json'] as const).map((m) => (
+              <button key={m} className={`btn sm ${mode === m ? '' : 'ghost'}`} onClick={() => switchMode(m)} style={{ textTransform: 'capitalize' }}>
+                {m === 'visual' ? '🧱 Visual' : m === 'preview' ? '👁 Preview' : '{ } JSON'}
+              </button>
+            ))}
+          </div>
+          {mode === 'visual' && (
+            <button className="btn sm" onClick={() => setShowPalette((s) => !s)}>➕ Add block</button>
+          )}
+        </div>
+
+        {/* Add-block palette */}
+        {mode === 'visual' && showPalette && (
+          <div style={{ padding: '10px 20px', borderBottom: '1px solid var(--border)', display: 'flex', flexWrap: 'wrap', gap: 6, flexShrink: 0, background: 'rgba(255,255,255,0.02)' }}>
+            {BLOCK_TYPES.map((bt) => (
+              <button key={bt.type} className="btn ghost sm" onClick={() => addBlock(bt.make)} title={`Add ${bt.label}`}>
+                <span style={{ marginRight: 5 }}>{bt.icon}</span>{bt.label}
+              </button>
+            ))}
+          </div>
+        )}
+
+        {/* Body */}
+        <div style={{ flex: 1, overflowY: 'auto', padding: 16 }}>
+          {!loaded && <div className="spinner" />}
+
+          {loaded && mode === 'visual' && (
+            <div className="grid" style={{ gap: 10 }}>
+              {blocks.length === 0 && <div className="muted" style={{ textAlign: 'center', padding: 30 }}>No content yet. Click "➕ Add block" to start authoring.</div>}
+              {blocks.map((b, i) => (
+                <BlockCard key={i} block={b} index={i} total={blocks.length}
+                  onChange={(nb) => updateBlock(i, nb)}
+                  onMove={(dir) => moveBlock(i, dir)}
+                  onDuplicate={() => duplicateBlock(i)}
+                  onDelete={() => deleteBlock(i)} />
+              ))}
+            </div>
+          )}
+
+          {loaded && mode === 'preview' && (
+            <div className="content card pad"><Blocks blocks={blocks} /></div>
+          )}
+
+          {loaded && mode === 'json' && (
+            <div>
+              <textarea value={json} spellCheck={false}
+                onChange={(e) => { setJson(e.target.value); try { JSON.parse(e.target.value); setJsonErr(''); } catch (err: any) { setJsonErr(err.message); } }}
+                style={{ width: '100%', minHeight: '60vh', padding: 14, borderRadius: 8, border: '1px solid var(--border)', fontFamily: 'ui-monospace, monospace', fontSize: 13, lineHeight: 1.5, background: 'var(--card,#0f172a)', color: 'inherit' }} />
+              {jsonErr && <div style={{ color: '#ef4444', fontSize: 12, marginTop: 6 }}>⚠ {jsonErr}</div>}
+            </div>
+          )}
+        </div>
+
+        {/* Footer */}
+        <div className="row between" style={{ padding: '12px 20px', borderTop: '1px solid var(--border)', flexShrink: 0 }}>
+          <div className="muted" style={{ fontSize: 12 }}>{blocks.length} blocks total</div>
+          <div className="row" style={{ gap: 8 }}>
+            <button className="btn ghost" onClick={onClose}>Cancel</button>
+            <button className="btn" disabled={saving || (mode === 'json' && !!jsonErr)} onClick={handleSave}>{saving ? 'Saving…' : '💾 Save Content'}</button>
+          </div>
         </div>
       </div>
     </div>
@@ -1937,6 +2689,599 @@ function Retention() {
           <button className="btn ghost" disabled={purging} onClick={purge} style={{ borderColor: 'var(--pink)', color: 'var(--pink)' }}>{purging ? 'Purging…' : '🗑 Run Purge Now'}</button>
         </div>
       </Panel>
+    </div>
+  );
+}
+
+// =====================================================================
+// CURRICULUM LIBRARY — 700+ chapters across 8 innovation tracks
+// =====================================================================
+const TRACK_COLORS: Record<string, string> = {
+  'Robotics': '#e63946',
+  'Electronics': '#f4a261',
+  'Arduino': '#2a9d8f',
+  'Sensors': '#2a9d8f',
+  'IoT': '#457b9d',
+  'AIoT': '#457b9d',
+  'AI': '#6a4c93',
+  'ML': '#6a4c93',
+  '3D': '#e76f51',
+  'Fabrication': '#e76f51',
+  'Entrepreneurship': '#ffb703',
+  'Tinkerpreneur': '#ffb703',
+  'Computational': '#43aa8b',
+};
+
+function trackColor(title: string) {
+  for (const [k, v] of Object.entries(TRACK_COLORS)) {
+    if (title.toLowerCase().includes(k.toLowerCase())) return v;
+  }
+  return '#6366f1';
+}
+
+function DonutChart({ value, max, color, size = 70 }: { value: number; max: number; color: string; size?: number }) {
+  const r = (size - 10) / 2;
+  const circ = 2 * Math.PI * r;
+  const pct = max > 0 ? Math.min(value / max, 1) : 0;
+  return (
+    <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} style={{ transform: 'rotate(-90deg)' }}>
+      <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="rgba(255,255,255,0.08)" strokeWidth={8} />
+      <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke={color} strokeWidth={8}
+        strokeDasharray={`${pct * circ} ${circ}`} strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function HBarChart({ data, colorFn }: { data: { label: string; value: number; color?: string }[]; colorFn?: (l: string) => string }) {
+  const max = Math.max(...data.map(d => d.value), 1);
+  return (
+    <div style={{ display: 'grid', gap: 7 }}>
+      {data.map(d => (
+        <div key={d.label} style={{ display: 'grid', gridTemplateColumns: '140px 1fr 40px', gap: 8, alignItems: 'center' }}>
+          <span style={{ fontSize: 12, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} className="muted">{d.label}</span>
+          <div style={{ background: 'rgba(255,255,255,0.06)', borderRadius: 4, height: 14, overflow: 'hidden' }}>
+            <div style={{ width: `${(d.value / max) * 100}%`, height: '100%', background: d.color || (colorFn ? colorFn(d.label) : '#6366f1'), borderRadius: 4, transition: 'width 0.4s ease' }} />
+          </div>
+          <b style={{ fontSize: 12, textAlign: 'right' }}>{d.value}</b>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function CurriculumLibrary() {
+  const [data, setData] = useState<any>(null);
+  const [openGrade, setOpenGrade] = useState<number | null>(null);
+  const [openModule, setOpenModule] = useState<number | null>(null);
+  const [openTrack, setOpenTrack] = useState<any>(null);
+
+  useEffect(() => { apiGet<any>('/admin/curriculum').then(setData).catch(() => {}); }, []);
+  if (!data) return <div className="spinner" />;
+
+  const { tree, tracks } = data;
+  const totalChapters = tracks.reduce((s: number, t: any) => s + t.chapter_count, 0);
+  const totalQuestions = tracks.reduce((s: number, t: any) => s + t.question_count, 0);
+  const uniqueTracks = tracks.length;
+
+  return (
+    <div className="grid">
+      {/* Hero */}
+      <div className="card pad dash-hero" style={{ background: 'linear-gradient(120deg,#0f2027,#203a43,#2c5364)' }}>
+        <div>
+          <span className="kicker">CURRICULUM LIBRARY</span>
+          <h2 style={{ color: '#fff', margin: '10px 0 6px' }}>📚 {totalChapters.toLocaleString()}+ Curriculum Chapters</h2>
+          <p style={{ color: '#b0c4d8', margin: 0, maxWidth: 560 }}>
+            {uniqueTracks} innovation tracks spanning Classes 6–12 — covering Robotics, Electronics, Arduino, IoT,
+            AI/ML, 3D Modelling, Entrepreneurship and Computational Thinking. Each chapter includes theory,
+            tinkering activities, quizzes and brain-teasers.
+          </p>
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 12, marginTop: 4 }}>
+          {[
+            { icon: '📖', n: totalChapters.toLocaleString(), l: 'Chapters' },
+            { icon: '❓', n: totalQuestions.toLocaleString(), l: 'Questions' },
+            { icon: '🛤️', n: uniqueTracks, l: 'Innovation Tracks' },
+          ].map(k => (
+            <div key={k.l} style={{ background: 'rgba(255,255,255,0.07)', borderRadius: 10, padding: '10px 14px' }}>
+              <div style={{ fontSize: 22 }}>{k.icon}</div>
+              <div style={{ fontSize: 20, fontWeight: 700, color: '#fff' }}>{k.n}</div>
+              <div style={{ fontSize: 12, color: '#8da8c0' }}>{k.l}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Innovation Tracks overview */}
+      <Panel title="8 Innovation Tracks" icon="🛤️" sub="Each track is a curriculum strand that runs across multiple classes with escalating complexity">
+        <HBarChart
+          data={tracks.map((t: any) => ({ label: t.icon ? `${t.icon} ${t.title}` : t.title, value: t.chapter_count, color: trackColor(t.title) }))}
+          colorFn={trackColor}
+        />
+        <div className="muted" style={{ fontSize: 12, marginTop: 14, marginBottom: 4 }}>👆 Click any track to list its grades, chapters and questions.</div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(220px,1fr))', gap: 12, marginTop: 4 }}>
+          {tracks.map((t: any) => {
+            const c = trackColor(t.title);
+            return (
+              <button
+                key={t.title}
+                className="card pad"
+                onClick={() => setOpenTrack(t)}
+                title={`View all ${t.title} chapters`}
+                style={{ borderLeft: `4px solid ${c}`, padding: '12px 14px', cursor: 'pointer', textAlign: 'left', width: '100%', background: 'var(--card, rgba(255,255,255,0.03))', transition: 'transform 0.12s ease, box-shadow 0.12s ease' }}
+                onMouseEnter={(e) => { e.currentTarget.style.transform = 'translateY(-2px)'; e.currentTarget.style.boxShadow = `0 6px 18px ${c}33`; }}
+                onMouseLeave={(e) => { e.currentTarget.style.transform = ''; e.currentTarget.style.boxShadow = ''; }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 6 }}>
+                  <span style={{ fontSize: 24 }}>{t.icon || '📘'}</span>
+                  <div>
+                    <b style={{ fontSize: 13 }}>{t.title}</b>
+                    <div className="muted" style={{ fontSize: 11 }}>{t.grades_count} grade{t.grades_count !== 1 ? 's' : ''}</div>
+                  </div>
+                </div>
+                <div style={{ display: 'flex', gap: 12 }}>
+                  <div style={{ textAlign: 'center' }}>
+                    <DonutChart value={t.chapter_count} max={Math.max(...tracks.map((x: any) => x.chapter_count))} color={c} size={52} />
+                  </div>
+                  <div style={{ fontSize: 12 }}>
+                    <div><b>{t.chapter_count}</b> chapters</div>
+                    <div className="muted">{t.question_count} questions</div>
+                  </div>
+                </div>
+                <div style={{ marginTop: 8, fontSize: 11, color: c, fontWeight: 600 }}>View details →</div>
+              </button>
+            );
+          })}
+        </div>
+      </Panel>
+
+      {openTrack && <TrackDetail track={openTrack} tree={tree} onClose={() => setOpenTrack(null)} />}
+
+      {/* Expandable grade tree */}
+      <Panel title="Grade-wise Curriculum Tree" icon="🌳" sub="Click a class to expand its modules and chapters">
+        {tree.map((g: any) => (
+          <div key={g.id} style={{ marginBottom: 6 }}>
+            <button
+              className={`card pad ${openGrade === g.id ? '' : 'ghost'}`}
+              onClick={() => setOpenGrade(openGrade === g.id ? null : g.id)}
+              style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 12, padding: '10px 14px', cursor: 'pointer', opacity: g.is_active ? 1 : 0.45 }}
+            >
+              <span style={{ fontSize: 20 }}>🏫</span>
+              <div style={{ flex: 1, textAlign: 'left' }}>
+                <b>{g.name}</b>
+                {g.level_label && <span className="muted" style={{ fontSize: 12, marginLeft: 8 }}>{g.level_label}</span>}
+                {!g.is_active && <span className="tag" style={{ color: 'var(--pink)', marginLeft: 8 }}>inactive</span>}
+              </div>
+              <div className="muted" style={{ fontSize: 12, textAlign: 'right' }}>
+                {g.modules?.length || 0} modules · {g.modules?.reduce((s: number, m: any) => s + m.chapter_count, 0) || 0} chapters
+              </div>
+              <span className="muted">{openGrade === g.id ? '▲' : '▼'}</span>
+            </button>
+
+            {openGrade === g.id && g.modules && (
+              <div style={{ marginLeft: 20, marginTop: 4, display: 'grid', gap: 4 }}>
+                {g.modules.length === 0 && <div className="muted" style={{ padding: '8px 0', fontSize: 13 }}>No modules yet. Add from Course Editor.</div>}
+                {g.modules.map((m: any) => {
+                  const isOpen = openModule === m.id;
+                  const mc = trackColor(m.title);
+                  return (
+                    <div key={m.id}>
+                      <button
+                        onClick={() => setOpenModule(isOpen ? null : m.id)}
+                        style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 10, padding: '8px 12px', borderRadius: 8, cursor: 'pointer', background: isOpen ? 'rgba(99,102,241,0.12)' : 'rgba(255,255,255,0.04)', border: `1px solid ${isOpen ? mc : 'var(--border)'}`, marginBottom: 2 }}
+                      >
+                        <span style={{ fontSize: 18 }}>{m.icon || '📘'}</span>
+                        <div style={{ flex: 1, textAlign: 'left' }}>
+                          <span style={{ fontSize: 13, fontWeight: 600 }}>{m.title}</span>
+                        </div>
+                        <span className="muted" style={{ fontSize: 12 }}>{m.chapter_count} ch · {m.question_count} q</span>
+                        <span className="muted" style={{ fontSize: 11 }}>{isOpen ? '▲' : '▼'}</span>
+                      </button>
+                      {isOpen && m.chapters && (
+                        <div style={{ marginLeft: 16, marginTop: 4, display: 'grid', gap: 2 }}>
+                          {m.chapters.map((c: any) => (
+                            <div key={c.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '6px 12px', borderRadius: 6, fontSize: 13, background: 'rgba(255,255,255,0.02)' }}>
+                              <span style={{ color: mc, fontSize: 10 }}>●</span>
+                              <span style={{ flex: 1 }}>{c.title}</span>
+                              <span className="tag" style={{ fontSize: 11 }}>{c.difficulty}</span>
+                              <span className="muted" style={{ fontSize: 11 }}>{c.questions}q</span>
+                              {!c.is_published && <span className="tag" style={{ color: 'var(--pink)', fontSize: 11 }}>draft</span>}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        ))}
+      </Panel>
+    </div>
+  );
+}
+
+// ------------------------------------------------------------------
+// TRACK DETAIL — drill into a single innovation track: grades,
+// chapters and question counts, computed from the curriculum tree.
+// ------------------------------------------------------------------
+function TrackDetail({ track, tree, onClose }: { track: any; tree: any[]; onClose: () => void }) {
+  const c = trackColor(track.title);
+  const [openGrade, setOpenGrade] = useState<number | null>(null);
+
+  // Gather every module across all grades whose title matches this track.
+  const gradeRows = (tree || [])
+    .map((g: any) => {
+      const mods = (g.modules || []).filter((m: any) => m.title === track.title);
+      const chapters = mods.flatMap((m: any) => m.chapters || []);
+      const questions = chapters.reduce((s: number, ch: any) => s + (ch.questions || 0), 0);
+      return { grade: g, mods, chapters, questions };
+    })
+    .filter((r: any) => r.mods.length > 0);
+
+  const totalChapters = gradeRows.reduce((s: number, r: any) => s + r.chapters.length, 0);
+  const totalQuestions = gradeRows.reduce((s: number, r: any) => s + r.questions, 0);
+
+  return (
+    <div className="modal-bg" onClick={onClose}>
+      <div className="card pad modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 760, maxHeight: '88vh', overflowY: 'auto', borderTop: `4px solid ${c}` }}>
+        <div className="row" style={{ justifyContent: 'space-between', alignItems: 'flex-start' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            <span style={{ fontSize: 30 }}>{track.icon || '📘'}</span>
+            <div>
+              <h2 style={{ margin: 0 }}>{track.title}</h2>
+              <div className="muted" style={{ fontSize: 13 }}>
+                {gradeRows.length} grade{gradeRows.length !== 1 ? 's' : ''} · {totalChapters} chapters · {totalQuestions} questions
+              </div>
+            </div>
+          </div>
+          <button className="modal-x" onClick={onClose}>✕</button>
+        </div>
+
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 10, margin: '14px 0' }}>
+          {[
+            { l: 'Grades', n: gradeRows.length, i: '🏫' },
+            { l: 'Chapters', n: totalChapters, i: '📖' },
+            { l: 'Questions', n: totalQuestions, i: '❓' },
+          ].map(k => (
+            <div key={k.l} style={{ background: 'rgba(255,255,255,0.05)', borderRadius: 10, padding: '10px 12px', textAlign: 'center' }}>
+              <div style={{ fontSize: 18 }}>{k.i}</div>
+              <div style={{ fontSize: 20, fontWeight: 700, color: c }}>{k.n}</div>
+              <div className="muted" style={{ fontSize: 11 }}>{k.l}</div>
+            </div>
+          ))}
+        </div>
+
+        {gradeRows.length === 0 && <div className="muted" style={{ padding: 12 }}>No chapters found for this track yet.</div>}
+
+        <div style={{ display: 'grid', gap: 6 }}>
+          {gradeRows.map((r: any) => {
+            const isOpen = openGrade === r.grade.id;
+            return (
+              <div key={r.grade.id}>
+                <button
+                  onClick={() => setOpenGrade(isOpen ? null : r.grade.id)}
+                  style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 10, padding: '10px 12px', borderRadius: 8, cursor: 'pointer', background: isOpen ? `${c}1f` : 'rgba(255,255,255,0.04)', border: `1px solid ${isOpen ? c : 'var(--border)'}` }}
+                >
+                  <span style={{ fontSize: 18 }}>🏫</span>
+                  <div style={{ flex: 1, textAlign: 'left' }}>
+                    <b style={{ fontSize: 13 }}>{r.grade.name}</b>
+                    {r.grade.level_label && <span className="muted" style={{ fontSize: 11, marginLeft: 8 }}>{r.grade.level_label}</span>}
+                    {!r.grade.is_active && <span className="tag" style={{ color: 'var(--pink)', marginLeft: 8, fontSize: 10 }}>inactive</span>}
+                  </div>
+                  <span className="muted" style={{ fontSize: 12 }}>{r.chapters.length} ch · {r.questions} q</span>
+                  <span className="muted" style={{ fontSize: 11 }}>{isOpen ? '▲' : '▼'}</span>
+                </button>
+                {isOpen && (
+                  <div style={{ marginLeft: 14, marginTop: 4, display: 'grid', gap: 2 }}>
+                    {r.chapters.length === 0 && <div className="muted" style={{ fontSize: 12, padding: '6px 0' }}>No chapters in this grade.</div>}
+                    {r.chapters.map((ch: any) => (
+                      <div key={ch.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '6px 12px', borderRadius: 6, fontSize: 13, background: 'rgba(255,255,255,0.02)' }}>
+                        <span style={{ color: c, fontSize: 10 }}>●</span>
+                        <span style={{ flex: 1 }}>{ch.title}</span>
+                        {ch.difficulty && <span className="tag" style={{ fontSize: 11 }}>{ch.difficulty}</span>}
+                        <span className="muted" style={{ fontSize: 11 }}>{ch.questions}q</span>
+                        {ch.is_published === false && <span className="tag" style={{ color: 'var(--pink)', fontSize: 11 }}>draft</span>}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+
+        <div className="row" style={{ justifyContent: 'flex-end', marginTop: 16 }}>
+          <button className="btn ghost" onClick={onClose}>Close</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ============================================================
+// TEACHING ROLES — Custom permission bundles for teachers
+// ============================================================
+function TeachingRoles() {
+  const [roles, setRoles] = useState<any[]>([]);
+  const [teachers, setTeachers] = useState<any[]>([]);
+  const [grades, setGrades] = useState<any[]>([]);
+  const [modules, setModules] = useState<any[]>([]);
+  const [view, setView] = useState<'list' | 'create' | 'edit'>('list');
+  const [editing, setEditing] = useState<any>(null);
+  const [name, setName] = useState('');
+  const [desc, setDesc] = useState('');
+  const [color, setColor] = useState('#6366f1');
+  const [scopes, setScopes] = useState<{ grade_id: number; module_id: number | null }[]>([]);
+  const [saving, setSaving] = useState(false);
+  const [msg, setMsg] = useState<{ k: 'ok' | 'err'; t: string } | null>(null);
+  const [assignRole, setAssignRole] = useState<number | null>(null);
+  const [assignTeacher, setAssignTeacher] = useState('');
+
+  const COLORS = ['#6366f1', '#0ea5e9', '#059669', '#f59e0b', '#e11d48', '#8b5cf6', '#14b8a6', '#f97316'];
+
+  async function load() {
+    const [r, t, g] = await Promise.all([
+      apiGet<any>('/admin/roles'),
+      apiGet<any>('/admin/roles/teachers'),
+      apiGet<any>('/admin/grades'),
+    ]);
+    setRoles(r.roles || []);
+    setTeachers(t.teachers || []);
+    setGrades(g.grades || []);
+  }
+
+  async function loadModulesForGrade(gradeId: number) {
+    const r = await apiGet<any>(`/content/grades/${gradeId}/modules`);
+    setModules(prev => {
+      const others = prev.filter(m => m.grade_id !== gradeId);
+      return [...others, ...r.modules.map((m: any) => ({ ...m, grade_id: gradeId }))];
+    });
+  }
+
+  useEffect(() => { load().catch(() => {}); }, []);
+
+  function startCreate() {
+    setEditing(null); setName(''); setDesc(''); setColor('#6366f1'); setScopes([]);
+    setMsg(null); setView('create');
+  }
+
+  function startEdit(role: any) {
+    setEditing(role);
+    setName(role.name);
+    setDesc(role.description || '');
+    setColor(role.color || '#6366f1');
+    const sc = (role.scopes || []).map((s: any) => ({ grade_id: s.grade_id, module_id: s.module_id ?? null }));
+    setScopes(sc);
+    // load modules for scoped grades
+    const gradeIds = [...new Set(sc.map((s: any) => s.grade_id))] as number[];
+    gradeIds.forEach(id => loadModulesForGrade(id).catch(() => {}));
+    setMsg(null); setView('edit');
+  }
+
+  async function save() {
+    if (!name.trim()) { setMsg({ k: 'err', t: 'Role name is required' }); return; }
+    setSaving(true); setMsg(null);
+    try {
+      if (editing) {
+        await apiPut(`/admin/roles/${editing.id}`, { name, description: desc, color, scopes });
+        setMsg({ k: 'ok', t: 'Role updated.' });
+      } else {
+        await apiPost('/admin/roles', { name, description: desc, color, scopes });
+        setMsg({ k: 'ok', t: 'Role created.' });
+      }
+      await load();
+      setTimeout(() => setView('list'), 1200);
+    } catch (e: any) {
+      setMsg({ k: 'err', t: e.message || 'Save failed' });
+    } finally { setSaving(false); }
+  }
+
+  async function deleteRole(id: number) {
+    if (!confirm('Delete this role? All teacher assignments for this role will be removed.')) return;
+    await apiDel(`/admin/roles/${id}`).catch(() => {});
+    load();
+  }
+
+  async function doAssign() {
+    if (!assignTeacher) return;
+    await apiPost(`/admin/roles/${assignRole}/assign`, { teacher_id: assignTeacher }).catch((e: any) => alert(e.message));
+    setAssignRole(null); setAssignTeacher('');
+    load();
+  }
+
+  async function revokeRole(roleId: number, teacherId: string) {
+    await apiDel(`/admin/roles/${roleId}/assign/${teacherId}`).catch(() => {});
+    load();
+  }
+
+  function addScope() {
+    const firstGrade = grades[0];
+    if (!firstGrade) return;
+    setScopes(s => [...s, { grade_id: firstGrade.id, module_id: null }]);
+    loadModulesForGrade(firstGrade.id).catch(() => {});
+  }
+
+  function updateScope(i: number, field: 'grade_id' | 'module_id', val: number | null) {
+    setScopes(s => s.map((sc, idx) => idx === i ? { ...sc, [field]: val } : sc));
+    if (field === 'grade_id' && val) loadModulesForGrade(val).catch(() => {});
+  }
+
+  function removeScope(i: number) { setScopes(s => s.filter((_, idx) => idx !== i)); }
+
+  if (view === 'create' || view === 'edit') {
+    const formGradeIds = [...new Set(scopes.map(s => s.grade_id))];
+    return (
+      <div className="grid">
+        <button className="btn ghost sm" style={{ alignSelf: 'flex-start' }} onClick={() => setView('list')}>← Back</button>
+        <div className="card pad">
+          <h2 style={{ marginTop: 0 }}>{editing ? '✏️ Edit Role' : '+ Create Teaching Role'}</h2>
+          <p className="muted" style={{ fontSize: 13 }}>Define a named role with grade and module scopes. Assign it to teachers to control what content they can see and manage.</p>
+
+          {msg && <div className="card pad" style={{ borderColor: msg.k === 'ok' ? 'var(--green)' : 'var(--red)', fontSize: 13, marginBottom: 12 }}>{msg.t}</div>}
+
+          <div className="grid" style={{ gap: 14, maxWidth: 560 }}>
+            <div className="field">
+              <label>Role Name *</label>
+              <input value={name} onChange={e => setName(e.target.value)} placeholder="e.g. Class 6 Electronics Teacher" />
+            </div>
+            <div className="field">
+              <label>Description</label>
+              <input value={desc} onChange={e => setDesc(e.target.value)} placeholder="Optional short description" />
+            </div>
+            <div className="field">
+              <label>Colour</label>
+              <div className="row" style={{ gap: 8, flexWrap: 'wrap' }}>
+                {COLORS.map(c => (
+                  <button key={c} onClick={() => setColor(c)}
+                    style={{ width: 28, height: 28, borderRadius: '50%', background: c, border: color === c ? '3px solid var(--text)' : '2px solid transparent', cursor: 'pointer' }} />
+                ))}
+              </div>
+            </div>
+          </div>
+
+          <div style={{ marginTop: 20 }}>
+            <div className="row between" style={{ marginBottom: 10 }}>
+              <h3 style={{ margin: 0, fontSize: 15 }}>📚 Grade & Module Scopes</h3>
+              <button className="btn ghost sm" onClick={addScope}>+ Add Scope</button>
+            </div>
+            <p className="muted" style={{ fontSize: 13, marginBottom: 12 }}>Each scope grants access to a specific grade (required) and optionally a specific module. Leave module as "All modules" to allow full grade access.</p>
+
+            {scopes.length === 0 && (
+              <div className="muted" style={{ padding: '12px 0', fontSize: 13 }}>No scopes added yet. Add at least one scope to limit teacher access. If no scopes are added, teacher keeps existing access.</div>
+            )}
+
+            {scopes.map((sc, i) => {
+              const gradeModules = modules.filter(m => m.grade_id === sc.grade_id);
+              return (
+                <div key={i} style={{ display: 'flex', gap: 10, alignItems: 'center', marginBottom: 8, background: 'var(--bg-2)', padding: '10px 12px', borderRadius: 8 }}>
+                  <select value={sc.grade_id} onChange={e => updateScope(i, 'grade_id', Number(e.target.value))} style={{ flex: 1 }}>
+                    {grades.map(g => <option key={g.id} value={g.id}>{g.name}</option>)}
+                  </select>
+                  <select value={sc.module_id ?? ''} onChange={e => updateScope(i, 'module_id', e.target.value ? Number(e.target.value) : null)} style={{ flex: 1 }}>
+                    <option value="">All modules</option>
+                    {gradeModules.map(m => <option key={m.id} value={m.id}>{m.icon} {m.title}</option>)}
+                  </select>
+                  <button className="btn ghost sm" style={{ color: 'var(--pink)' }} onClick={() => removeScope(i)}>✕</button>
+                </div>
+              );
+            })}
+          </div>
+
+          <div style={{ marginTop: 16, display: 'flex', gap: 10 }}>
+            <button className="btn" disabled={saving} onClick={save}>{saving ? 'Saving…' : editing ? 'Update Role' : 'Create Role'}</button>
+            <button className="btn ghost" onClick={() => setView('list')}>Cancel</button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="grid">
+      <div className="card pad dash-hero" style={{ background: 'linear-gradient(120deg,#1a0533,#1e3a6e)' }}>
+        <div>
+          <span className="kicker">ROLE MANAGEMENT</span>
+          <h2 style={{ color: '#fff', margin: '8px 0 6px' }}>🎭 Teaching Roles</h2>
+          <p style={{ color: '#b0c4de', margin: 0 }}>
+            Create named roles (e.g. "Class 6 Electronics Teacher") with specific grade and module access.
+            Assign roles to teachers — they will only see the grades and modules allowed by their role(s).
+          </p>
+        </div>
+        <button className="btn" onClick={startCreate}>+ Create Role</button>
+      </div>
+
+      {/* All roles */}
+      <Panel title="All Roles" icon="🎭" sub={`${roles.length} roles defined`}>
+        {roles.length === 0 && (
+          <div className="muted" style={{ padding: '20px 0', textAlign: 'center' }}>
+            No roles created yet. Click "Create Role" to define your first teaching role.
+          </div>
+        )}
+        {roles.map(r => (
+          <div key={r.id} style={{ borderBottom: '1px solid var(--border)', paddingBottom: 16, marginBottom: 16 }}>
+            <div className="row between" style={{ marginBottom: 8, flexWrap: 'wrap', gap: 8 }}>
+              <div className="row" style={{ gap: 10 }}>
+                <span style={{ width: 14, height: 14, borderRadius: '50%', background: r.color || '#6366f1', display: 'inline-block', flexShrink: 0 }} />
+                <b style={{ fontSize: 15 }}>{r.name}</b>
+                {r.description && <span className="muted" style={{ fontSize: 13 }}>{r.description}</span>}
+                <span className="tag" style={{ fontSize: 11 }}>{r.teacher_count} teacher{r.teacher_count !== 1 ? 's' : ''}</span>
+              </div>
+              <div className="row" style={{ gap: 8 }}>
+                <button className="btn ghost sm" onClick={() => { setAssignRole(r.id); setAssignTeacher(''); }}>Assign teacher</button>
+                <button className="btn ghost sm" onClick={() => startEdit(r)}>Edit</button>
+                <button className="btn ghost sm" style={{ color: 'var(--pink)' }} onClick={() => deleteRole(r.id)}>Delete</button>
+              </div>
+            </div>
+
+            {/* Scopes */}
+            {(r.scopes || []).length > 0 && (
+              <div className="row wrap" style={{ gap: 6, marginBottom: 10 }}>
+                <span className="muted" style={{ fontSize: 12 }}>Scopes:</span>
+                {r.scopes.map((s: any) => (
+                  <span key={s.scope_id} className="tag" style={{ fontSize: 11 }}>
+                    {s.grade_name}{s.module_title ? ` → ${s.module_title}` : ' (all modules)'}
+                  </span>
+                ))}
+              </div>
+            )}
+            {(r.scopes || []).length === 0 && (
+              <div className="muted" style={{ fontSize: 12, marginBottom: 10 }}>⚠️ No scopes defined — this role grants no additional access restrictions.</div>
+            )}
+          </div>
+        ))}
+      </Panel>
+
+      {/* Teachers with their roles */}
+      <Panel title="Teachers & Assigned Roles" icon="👩‍🏫">
+        {teachers.length === 0 && <div className="muted">No teachers found.</div>}
+        {teachers.map(t => (
+          <div key={t.id} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 0', borderBottom: '1px solid var(--border)' }}>
+            <div className="avatar" style={{ flexShrink: 0 }}>{(t.full_name || 'T')[0]}</div>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <b>{t.full_name}</b>
+              <div className="muted" style={{ fontSize: 12 }}>{t.email}</div>
+              <div className="row wrap" style={{ gap: 4, marginTop: 4 }}>
+                {t.roles.length === 0 && <span className="tag" style={{ fontSize: 11 }}>No roles assigned</span>}
+                {t.roles.map((role: any) => (
+                  <span key={role.role_id} className="tag" style={{ fontSize: 11, background: role.color || '#6366f1', color: '#fff', display: 'flex', alignItems: 'center', gap: 4 }}>
+                    {role.role_name}
+                    <button onClick={() => revokeRole(role.role_id, t.id)} style={{ background: 'none', border: 'none', color: 'rgba(255,255,255,0.7)', cursor: 'pointer', padding: 0, fontSize: 12, lineHeight: 1 }}>✕</button>
+                  </span>
+                ))}
+              </div>
+            </div>
+            <button className="btn ghost sm" onClick={() => { setAssignRole(null); setAssignRole(-1 as any); setAssignTeacher(t.id); }}>+ Role</button>
+          </div>
+        ))}
+      </Panel>
+
+      {/* Assign modal */}
+      {assignRole !== null && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 200 }}>
+          <div className="card pad" style={{ width: 400, maxWidth: '90vw' }}>
+            <h3 style={{ margin: '0 0 12px' }}>Assign Role to Teacher</h3>
+            <div className="field">
+              <label>Select Role</label>
+              <select value={assignRole ?? ''} onChange={e => setAssignRole(Number(e.target.value))}>
+                <option value="">-- Pick a role --</option>
+                {roles.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
+              </select>
+            </div>
+            <div className="field">
+              <label>Select Teacher</label>
+              <select value={assignTeacher} onChange={e => setAssignTeacher(e.target.value)}>
+                <option value="">-- Pick a teacher --</option>
+                {teachers.map(t => <option key={t.id} value={t.id}>{t.full_name}</option>)}
+              </select>
+            </div>
+            <div className="row" style={{ gap: 10, marginTop: 12 }}>
+              <button className="btn" onClick={doAssign} disabled={!assignRole || !assignTeacher}>Assign</button>
+              <button className="btn ghost" onClick={() => { setAssignRole(null); setAssignTeacher(''); }}>Cancel</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

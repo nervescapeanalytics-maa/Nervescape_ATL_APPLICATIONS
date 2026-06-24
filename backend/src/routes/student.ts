@@ -14,6 +14,28 @@ async function myGrade(req: any): Promise<number> {
   return u.grade_id;
 }
 
+// All grades this student can access: primary class + admin-granted custom classes.
+async function accessibleGradeIds(req: any): Promise<number[]> {
+  const u = await one<any>(`SELECT grade_id FROM users WHERE id=$1`, [req.user.id]);
+  const { rows } = await query(`SELECT grade_id FROM student_grade_access WHERE student_id=$1`, [req.user.id]);
+  const ids = new Set<number>();
+  if (u?.grade_id) ids.add(u.grade_id);
+  for (const r of rows) ids.add(r.grade_id);
+  return [...ids];
+}
+
+// Resolve which grade the student is requesting, validating access.
+// Falls back to the primary class when no/invalid gradeId is supplied.
+async function resolveGrade(req: any): Promise<number> {
+  const requested = req.query.gradeId ? Number(req.query.gradeId) : null;
+  const allowed = await accessibleGradeIds(req);
+  if (requested && allowed.includes(requested)) return requested;
+  if (allowed.length === 0) throw httpError(400, 'No class assigned to your account. Please contact your teacher.');
+  // default to primary class if set, else first accessible
+  const u = await one<any>(`SELECT grade_id FROM users WHERE id=$1`, [req.user.id]);
+  return u?.grade_id && allowed.includes(u.grade_id) ? u.grade_id : allowed[0];
+}
+
 // dashboard
 router.get('/dashboard', asyncH(async (req, res) => {
   const gradeId = await myGrade(req);
@@ -36,8 +58,9 @@ router.get('/dashboard', asyncH(async (req, res) => {
 }));
 
 // my modules + chapters with progress
+// Optional ?gradeId= to view a different class the student has access to.
 router.get('/courses', asyncH(async (req, res) => {
-  const gradeId = await myGrade(req);
+  const gradeId = await resolveGrade(req);
   const { rows: modules } = await query(
     `SELECT id, title, slug, icon, color, description, order_index FROM modules WHERE grade_id=$1 ORDER BY order_index, id`, [gradeId]
   );
@@ -177,57 +200,26 @@ router.get('/profile', asyncH(async (req, res) => {
   res.json({ profile: u });
 }));
 
-const profileUpdateSchema = z.object({
-  full_name: z.string().min(2).optional(),
-  phone: z.string().optional().nullable(),
-  date_of_birth: z.string().optional().nullable(),
-  gender: z.string().optional().nullable(),
-  blood_group: z.string().optional().nullable(),
-  address_line1: z.string().optional().nullable(),
-  address_line2: z.string().optional().nullable(),
-  city: z.string().optional().nullable(),
-  state: z.string().optional().nullable(),
-  country: z.string().optional().nullable(),
-  pincode: z.string().optional().nullable(),
-  parent_name: z.string().optional().nullable(),
-  parent_phone: z.string().optional().nullable(),
-  parent_email: z.string().email().optional().nullable(),
-  parent_relation: z.string().optional().nullable(),
-  parent_occupation: z.string().optional().nullable(),
-  school_name: z.string().optional().nullable(),
-  school_city: z.string().optional().nullable(),
-  roll_number: z.string().optional().nullable(),
-  admission_year: z.number().int().optional().nullable(),
-  hobbies: z.string().optional().nullable(),
-  languages: z.string().optional().nullable(),
-  bio: z.string().optional().nullable(),
-  emergency_contact: z.string().optional().nullable(),
-  emergency_phone: z.string().optional().nullable(),
+// Students can only update their own phone number
+const studentProfileUpdateSchema = z.object({
+  phone: z.string().max(20).optional().nullable(),
 });
 
 router.put('/profile', asyncH(async (req, res) => {
-  const data = profileUpdateSchema.parse(req.body);
-  const { full_name, phone, ...ext } = data;
-  if (full_name !== undefined || phone !== undefined) {
-    const sets: string[] = []; const vals: any[] = [];
-    let i = 1;
-    if (full_name !== undefined) { sets.push(`full_name=$${i++}`); vals.push(full_name); }
-    if (phone !== undefined) { sets.push(`phone=$${i++}`); vals.push(phone); }
-    vals.push(req.user!.id);
-    if (sets.length) await query(`UPDATE users SET ${sets.join(', ')}, updated_at=now() WHERE id=$${i}`, vals);
-  }
-  const extKeys = Object.keys(ext).filter(k => (ext as any)[k] !== undefined) as (keyof typeof ext)[];
-  if (extKeys.length) {
-    const cols = extKeys.join(', ');
-    const vals = [req.user!.id, ...extKeys.map(k => (ext as any)[k])];
-    const placeholders = extKeys.map((_, i) => `$${i + 2}`).join(', ');
-    const updates = extKeys.map((k, i) => `${k}=$${i + 2}`).join(', ');
-    await query(
-      `INSERT INTO user_profiles (user_id, ${cols}) VALUES ($1, ${placeholders})
-       ON CONFLICT (user_id) DO UPDATE SET ${updates}, updated_at=now()`, vals
-    );
+  const data = studentProfileUpdateSchema.parse(req.body);
+  if (data.phone !== undefined) {
+    await query(`UPDATE users SET phone=$1, updated_at=now() WHERE id=$2`, [data.phone, req.user!.id]);
   }
   res.json({ ok: true });
+}));
+
+// Avatar upload — accepts base64 data URL (max ~2MB decoded ≈ ~2.7MB base64)
+const avatarSchema = z.object({ dataUrl: z.string().min(10).max(3_500_000) });
+router.post('/profile/avatar', asyncH(async (req, res) => {
+  const { dataUrl } = avatarSchema.parse(req.body);
+  if (!dataUrl.startsWith('data:image/')) throw httpError(400, 'Only image data URLs accepted');
+  await query(`UPDATE users SET avatar_url=$1, updated_at=now() WHERE id=$2`, [dataUrl, req.user!.id]);
+  res.json({ ok: true, avatar_url: dataUrl });
 }));
 
 // ---- progress report ----
@@ -257,6 +249,42 @@ router.get('/report', asyncH(async (req, res) => {
      WHERE u.id = $1`, [req.user!.id]
   );
   res.json({ byModule, summary });
+}));
+
+// List all grades this student is allowed to access
+// (primary class + any extra classes granted by admin)
+router.get('/my-classes', asyncH(async (req, res) => {
+  const u = await one<any>(`SELECT grade_id FROM users WHERE id=$1`, [req.user!.id]);
+  const primaryId = u?.grade_id ?? null;
+
+  // Extra grades granted by admin
+  const { rows: extra } = await query(
+    `SELECT sga.grade_id, g.name AS grade_name, g.number AS grade_number,
+            g.level_label, TRUE AS is_extra
+     FROM student_grade_access sga
+     JOIN grades g ON g.id = sga.grade_id
+     WHERE sga.student_id = $1
+     ORDER BY g.number`,
+    [req.user!.id]
+  );
+
+  // Primary class
+  let primary: any = null;
+  if (primaryId) {
+    primary = await one<any>(
+      `SELECT id AS grade_id, name AS grade_name, number AS grade_number, level_label, FALSE AS is_extra
+       FROM grades WHERE id=$1`, [primaryId]
+    );
+  }
+
+  // Merge, de-duplicate
+  const all: any[] = [];
+  if (primary) all.push(primary);
+  for (const e of extra) {
+    if (!all.find((g) => g.grade_id === e.grade_id)) all.push(e);
+  }
+
+  res.json({ classes: all, primary_grade_id: primaryId });
 }));
 
 export default router;

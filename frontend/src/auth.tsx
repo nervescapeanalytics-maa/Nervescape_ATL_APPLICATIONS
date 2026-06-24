@@ -9,6 +9,7 @@ export interface User {
   email: string;
   grade_id?: number | null;
   grade_name?: string | null;
+  avatar_url?: string | null;
 }
 
 interface AuthCtx {
@@ -16,6 +17,7 @@ interface AuthCtx {
   loading: boolean;
   login: (identifier: string, password: string, role: Role) => Promise<User>;
   logout: () => void;
+  patchUser: (patch: Partial<User>) => void;
 }
 
 const Ctx = createContext<AuthCtx>(null as any);
@@ -43,6 +45,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setToken(null);
     setUser(null);
   }
+  function patchUser(patch: Partial<User>) {
+    setUser(u => u ? { ...u, ...patch } : u);
+  }
 
-  return <Ctx.Provider value={{ user, loading, login, logout }}>{children}</Ctx.Provider>;
+  return <Ctx.Provider value={{ user, loading, login, logout, patchUser }}>{children}</Ctx.Provider>;
 }
