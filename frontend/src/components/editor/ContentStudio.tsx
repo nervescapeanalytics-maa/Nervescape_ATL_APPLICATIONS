@@ -247,7 +247,9 @@ function BlockCard({ block, index, total, onChange, onMove, onDuplicate, onDelet
 }
 
 // ── main Content Studio ────────────────────────────────────────────────────────
-export default function ContentStudio({ chapter, onClose, onSave }: { chapter: any; onClose: () => void; onSave: (blocks: any[]) => void }) {
+export default function ContentStudio({ chapter, onClose, onSave, catalog }: {
+  chapter: any; onClose: () => void; onSave: (blocks: any[]) => void; catalog?: boolean;
+}) {
   const [loaded, setLoaded] = useState(false);
   const [blocks, setBlocks] = useState<any[]>([]);
   const [mode, setMode] = useState<'visual' | 'preview' | 'json'>('visual');
@@ -261,11 +263,12 @@ export default function ContentStudio({ chapter, onClose, onSave }: { chapter: a
   const [imageBlockIdx, setImageBlockIdx] = useState<number | null>(null);
 
   useEffect(() => {
-    apiGet<any>(`/content/chapters/${chapter.id}`).then((d) => {
-      const b = Array.isArray(d.chapter.content) ? d.chapter.content : [];
+    const url = catalog ? `/admin/catalog/chapters/${chapter.id}` : `/content/chapters/${chapter.id}`;
+    apiGet<any>(url).then((d) => {
+      const b = Array.isArray(d.chapter?.content) ? d.chapter.content : [];
       setBlocks(b); setJson(JSON.stringify(b, null, 2)); setLoaded(true);
     }).catch(() => setLoaded(true));
-  }, [chapter.id]);
+  }, [chapter.id, catalog]);
 
   const updateBlock = (i: number, b: any) => setBlocks((p) => p.map((x, idx) => (idx === i ? b : x)));
   const moveBlock = (i: number, dir: -1 | 1) => setBlocks((p) => { const j = i + dir; if (j < 0 || j >= p.length) return p; const n = [...p]; [n[i], n[j]] = [n[j], n[i]]; return n; });

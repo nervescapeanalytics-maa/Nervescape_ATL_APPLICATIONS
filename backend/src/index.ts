@@ -10,6 +10,7 @@ import authRoutes from './routes/auth';
 import publicRoutes from './routes/public';
 import contentRoutes from './routes/content';
 import adminRoutes from './routes/admin';
+import adminCatalogRoutes from './routes/adminCatalog';
 import teacherRoutes from './routes/teacher';
 import studentRoutes from './routes/student';
 import { seedChallengeBank } from './db/challengeBank';
@@ -35,6 +36,7 @@ app.use('/api/auth', authLimiter, authRoutes);
 app.use('/api/public', publicRoutes);
 app.use('/api/content', contentRoutes);
 app.use('/api/admin', adminRoutes);
+app.use('/api/admin/catalog', adminCatalogRoutes);
 app.use('/api/teacher', teacherRoutes);
 app.use('/api/student', studentRoutes);
 

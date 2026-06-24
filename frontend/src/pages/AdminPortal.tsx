@@ -6,6 +6,8 @@ import { THEMES, getTheme, applyTheme, getBoolPref, setBoolPref, getPref, setPre
 import Blocks from '../components/Blocks';
 import ContentStudio from '../components/editor/ContentStudio';
 import RichTextEditor from '../components/editor/RichTextEditor';
+import CourseRepository from '../components/academic/CourseRepository';
+import LearningLevels from '../components/academic/LearningLevels';
 
 export default function AdminPortal() {
   const [tab, setTab] = useState('overview');
@@ -22,8 +24,10 @@ export default function AdminPortal() {
       tabs={[
         { key: 'overview', label: 'Control Center', icon: '🏠', group: 'Overview' },
         { key: 'activity', label: 'Activity Feed', icon: '🕒', group: 'Governance' },
+        { key: 'repository', label: 'Course Repository', icon: '🗄️', group: 'Academics' },
+        { key: 'levels', label: 'Learning Levels', icon: '📊', group: 'Academics' },
         { key: 'curriculum', label: 'Curriculum Library', icon: '🗂️', group: 'Academics' },
-        { key: 'courses', label: 'Course Editor', icon: '📚', group: 'Academics' },
+        { key: 'courses', label: 'Class Editor', icon: '📚', group: 'Academics' },
         { key: 'classes', label: 'Classes', icon: '🏫', group: 'Academics' },
         { key: 'assignments', label: 'Assignments', icon: '🔗', group: 'Academics' },
         { key: 'admins', label: 'Admins', icon: '🛡️', group: 'People' },
@@ -43,6 +47,8 @@ export default function AdminPortal() {
     >
       {tab === 'overview' && <Overview go={setTab} />}
       {tab === 'activity' && <ActivityFeed />}
+      {tab === 'repository' && <CourseRepository />}
+      {tab === 'levels' && <LearningLevels />}
       {tab === 'curriculum' && <CurriculumLibrary />}
       {tab === 'courses' && <Courses />}
       {tab === 'classes' && <GradeManager />}

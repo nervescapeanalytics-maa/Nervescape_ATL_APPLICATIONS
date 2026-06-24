@@ -11,6 +11,7 @@ import { grade7 } from './grade7';
 import { grade8 } from './grade8';
 import { grade9, grade10, grade11, grade12 } from './grade9to12';
 import { richElectronicsChapters, richRoboticsChapters, richIoTChapters } from './richChapters';
+import { seedCatalogRepository } from './catalogSeed';
 import { aiModuleForClass, aiGradeSpec } from './aiCourse';
 
 // Merge rich chapters into grade9 — override stubs with full book-quality content
@@ -183,6 +184,9 @@ async function main() {
 
   // 3b) 3-month AI course for classes 3-10 (activates 3,4,5)
   await seedAiCourse(adminId);
+
+  // 3c) centralized course repository (levels + import existing modules)
+  await seedCatalogRepository(adminId);
 
   // 4) demo teachers (one per active grade) wired by admin
   const teacherMap: Record<number, { id: string; gradeId: number }> = {

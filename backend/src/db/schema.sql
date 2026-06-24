@@ -437,3 +437,77 @@ CREATE TABLE IF NOT EXISTS student_grade_access (
   UNIQUE (student_id, grade_id)
 );
 CREATE INDEX IF NOT EXISTS idx_sga_student ON student_grade_access(student_id);
+
+-- =====================================================================
+-- Centralized Course Repository
+-- All courses live in course_catalog, grouped by curriculum_levels.
+-- catalog_grade_map deploys a catalog course to one or more classes.
+-- =====================================================================
+CREATE TABLE IF NOT EXISTS curriculum_levels (
+  id          SERIAL PRIMARY KEY,
+  name        TEXT NOT NULL UNIQUE,
+  slug        TEXT NOT NULL UNIQUE,
+  description TEXT,
+  order_index INT NOT NULL DEFAULT 0,
+  is_active   BOOLEAN NOT NULL DEFAULT TRUE,
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS course_catalog (
+  id          SERIAL PRIMARY KEY,
+  level_id    INT REFERENCES curriculum_levels(id) ON DELETE SET NULL,
+  title       TEXT NOT NULL,
+  slug        TEXT NOT NULL UNIQUE,
+  icon        TEXT DEFAULT '📘',
+  color       TEXT DEFAULT '#6366f1',
+  description TEXT,
+  status      TEXT NOT NULL DEFAULT 'draft',
+  order_index INT NOT NULL DEFAULT 0,
+  created_by  UUID REFERENCES users(id) ON DELETE SET NULL,
+  updated_by  UUID REFERENCES users(id) ON DELETE SET NULL,
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_catalog_level ON course_catalog(level_id);
+
+CREATE TABLE IF NOT EXISTS catalog_chapters (
+  id            SERIAL PRIMARY KEY,
+  catalog_id    INT NOT NULL REFERENCES course_catalog(id) ON DELETE CASCADE,
+  title         TEXT NOT NULL,
+  slug          TEXT NOT NULL,
+  summary       TEXT,
+  difficulty    TEXT DEFAULT 'beginner',
+  est_minutes   INT DEFAULT 60,
+  content       JSONB NOT NULL DEFAULT '[]'::jsonb,
+  order_index   INT NOT NULL DEFAULT 0,
+  is_published  BOOLEAN NOT NULL DEFAULT TRUE,
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (catalog_id, slug)
+);
+CREATE INDEX IF NOT EXISTS idx_catalog_chapters ON catalog_chapters(catalog_id);
+
+CREATE TABLE IF NOT EXISTS catalog_grade_map (
+  id                 SERIAL PRIMARY KEY,
+  catalog_id         INT NOT NULL REFERENCES course_catalog(id) ON DELETE CASCADE,
+  grade_id           INT NOT NULL REFERENCES grades(id) ON DELETE CASCADE,
+  order_index        INT NOT NULL DEFAULT 0,
+  deployed_module_id INT REFERENCES modules(id) ON DELETE SET NULL,
+  created_at         TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (catalog_id, grade_id)
+);
+CREATE INDEX IF NOT EXISTS idx_cgm_catalog ON catalog_grade_map(catalog_id);
+CREATE INDEX IF NOT EXISTS idx_cgm_grade ON catalog_grade_map(grade_id);
+
+ALTER TABLE modules ADD COLUMN IF NOT EXISTS catalog_id INT REFERENCES course_catalog(id) ON DELETE SET NULL;
+CREATE INDEX IF NOT EXISTS idx_modules_catalog ON modules(catalog_id);
+
+ALTER TABLE grades ADD COLUMN IF NOT EXISTS level_id INT REFERENCES curriculum_levels(id) ON DELETE SET NULL;
+
+DROP TRIGGER IF EXISTS trg_catalog_updated ON course_catalog;
+CREATE TRIGGER trg_catalog_updated BEFORE UPDATE ON course_catalog
+  FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+
+DROP TRIGGER IF EXISTS trg_catalog_chapters_updated ON catalog_chapters;
+CREATE TRIGGER trg_catalog_chapters_updated BEFORE UPDATE ON catalog_chapters
+  FOR EACH ROW EXECUTE FUNCTION set_updated_at();

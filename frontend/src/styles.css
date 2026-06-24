@@ -1107,3 +1107,27 @@ tbody tr:hover { background: var(--card-2); }
 .canvas-editor-panel { background: var(--card, #fff); border-radius: 14px; padding: 20px; max-width: 900px; width: 100%; max-height: 94vh; overflow-y: auto; box-shadow: 0 20px 60px rgba(0,0,0,.2); }
 .canvas-editor-frame { border: 1px solid var(--border); border-radius: 8px; overflow: auto; background: #e2e8f0; display: flex; justify-content: center; padding: 8px; }
 
+/* ═══ Course Repository ═══ */
+.repo-layout { display: grid; grid-template-columns: 240px 1fr; gap: 16px; align-items: start; }
+@media (max-width: 900px) { .repo-layout { grid-template-columns: 1fr; } }
+.repo-sidebar { position: sticky; top: 12px; max-height: calc(100vh - 120px); overflow-y: auto; }
+.repo-level-btn {
+  display: flex; align-items: center; gap: 8px; width: 100%; padding: 10px 12px; margin-bottom: 4px;
+  border: 1px solid transparent; border-radius: 8px; background: transparent; cursor: pointer;
+  font-size: 13px; color: inherit; text-align: left; transition: background .15s;
+}
+.repo-level-btn:hover { background: rgba(99,102,241,.06); }
+.repo-level-btn.active { background: rgba(99,102,241,.12); border-color: var(--primary, #6366f1); font-weight: 600; }
+.repo-count { font-size: 11px; padding: 2px 8px; border-radius: 99px; background: var(--border); margin-left: auto; }
+.repo-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 12px; }
+.repo-course-card { cursor: pointer; text-align: left; transition: transform .12s, box-shadow .12s; border: 1px solid var(--border); width: 100%; }
+.repo-course-card:hover { transform: translateY(-2px); box-shadow: 0 8px 24px rgba(0,0,0,.08); }
+.repo-detail-cols { display: grid; gap: 14px; }
+.repo-class-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 8px; }
+.repo-class-chip {
+  display: flex; flex-direction: column; gap: 2px; padding: 10px 12px; border-radius: 8px;
+  border: 1px solid var(--border); cursor: pointer; font-size: 13px; transition: all .15s;
+}
+.repo-class-chip:has(input:checked), .repo-class-chip.on { border-color: var(--primary, #6366f1); background: rgba(99,102,241,.08); }
+.repo-class-chip input { margin-right: 6px; }
+
