@@ -1,10 +1,11 @@
 import { useEffect, useState } from 'react';
-import type { ReactNode, CSSProperties } from 'react';
 import { apiGet, apiPost, apiPut, apiDel } from '../api';
 import Layout from '../components/Layout';
 import { useAuth } from '../auth';
 import { THEMES, getTheme, applyTheme, getBoolPref, setBoolPref, getPref, setPref } from '../theme';
 import Blocks from '../components/Blocks';
+import ContentStudio from '../components/editor/ContentStudio';
+import RichTextEditor from '../components/editor/RichTextEditor';
 
 export default function AdminPortal() {
   const [tab, setTab] = useState('overview');
@@ -1109,7 +1110,7 @@ function Courses() {
       )}
       {viewChap && <ChapterViewer chapterId={viewChap.id} onClose={() => setViewChap(null)} />}
       {editContent && (
-        <ChapterContentEditor
+        <ContentStudio
           chapter={editContent}
           onClose={() => setEditContent(null)}
           onSave={(blocks) => saveContent(editContent.id, blocks)}
@@ -1123,19 +1124,25 @@ function ModuleEditor({ initial, onClose, onSave }: { initial: any; onClose: () 
   const [d, setD] = useState<any>(initial);
   return (
     <div className="modal-bg" onClick={onClose}>
-      <div className="modal" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 540 }}>
-        <div className="row between" style={{ marginBottom: 12 }}>
+      <div className="modal card" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 640, padding: 0, overflow: 'hidden', display: 'flex', flexDirection: 'column', maxHeight: '90vh' }}>
+        <div className="row between" style={{ padding: '14px 20px', borderBottom: '1px solid var(--border)' }}>
           <h3 style={{ margin: 0 }}>{d.id ? '✏️ Edit Module' : '➕ New Module'}</h3>
-          <button className="btn ghost sm" onClick={onClose}>✕</button>
+          <button className="modal-x" onClick={onClose}>✕</button>
         </div>
-        <div className="grid2" style={{ gap: 10 }}>
-          <div className="field" style={{ gridColumn: '1 / span 2' }}><label>Title</label><input value={d.title || ''} onChange={(e) => setD({ ...d, title: e.target.value })} /></div>
-          <div className="field"><label>Icon (emoji)</label><input value={d.icon || ''} onChange={(e) => setD({ ...d, icon: e.target.value })} placeholder="🤖" /></div>
-          <div className="field"><label>Accent Color</label><input type="color" value={d.color || '#6366f1'} onChange={(e) => setD({ ...d, color: e.target.value })} /></div>
-          <div className="field" style={{ gridColumn: '1 / span 2' }}><label>Description</label><textarea rows={3} value={d.description || ''} onChange={(e) => setD({ ...d, description: e.target.value })} /></div>
-          <div className="field"><label>Order Index</label><input type="number" value={d.order_index ?? ''} onChange={(e) => setD({ ...d, order_index: e.target.value === '' ? undefined : Number(e.target.value) })} /></div>
+        <div style={{ padding: '16px 20px', overflowY: 'auto', flex: 1 }}>
+          <div className="grid2" style={{ gap: 10 }}>
+            <div className="field" style={{ gridColumn: '1 / span 2' }}><label>Title</label><input value={d.title || ''} onChange={(e) => setD({ ...d, title: e.target.value })} /></div>
+            <div className="field"><label>Icon (emoji)</label><input value={d.icon || ''} onChange={(e) => setD({ ...d, icon: e.target.value })} placeholder="🤖" /></div>
+            <div className="field"><label>Accent Color</label><input type="color" value={d.color || '#6366f1'} onChange={(e) => setD({ ...d, color: e.target.value })} style={{ width: '100%', height: 38, border: 'none', cursor: 'pointer' }} /></div>
+            <div className="field" style={{ gridColumn: '1 / span 2' }}><label>Description</label>
+              <RichTextEditor compact value={d.description_html || (d.description ? `<p>${d.description}</p>` : '')}
+                onChange={(html) => setD({ ...d, description_html: html, description: html.replace(/<[^>]+>/g, '').trim() })}
+                minHeight={100} placeholder="Describe this module…" />
+            </div>
+            <div className="field"><label>Order Index</label><input type="number" value={d.order_index ?? ''} onChange={(e) => setD({ ...d, order_index: e.target.value === '' ? undefined : Number(e.target.value) })} /></div>
+          </div>
         </div>
-        <div className="row" style={{ gap: 8, marginTop: 14 }}>
+        <div className="row" style={{ gap: 8, padding: '12px 20px', borderTop: '1px solid var(--border)' }}>
           <button className="btn" disabled={!d.title || !d.grade_id} onClick={() => onSave(d)}>{d.id ? 'Save Changes' : 'Create Module'}</button>
           <button className="btn ghost" onClick={onClose}>Cancel</button>
         </div>
@@ -1240,387 +1247,6 @@ function ChapterViewer({ chapterId, onClose }: { chapterId: number; onClose: () 
 
         <div className="row" style={{ justifyContent: 'flex-end', marginTop: 20, paddingTop: 12, borderTop: '1px solid var(--border)' }}>
           <button className="btn ghost" onClick={onClose}>Close</button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// ══════════════════════════════════════════════════════════════════════════════
-// RICH VISUAL CHAPTER CONTENT EDITOR
-// A modern block-based editor: add / edit / reorder / duplicate / delete content
-// blocks with friendly per-type forms, a live preview, and an advanced JSON mode.
-// ══════════════════════════════════════════════════════════════════════════════
-
-// ---- small helpers for list<->lines conversion ----
-const linesToArr = (s: string): string[] => s.split('\n').map((x) => x.trim()).filter(Boolean);
-const arrToLines = (a?: string[]): string => (a || []).join('\n');
-
-// Block type catalogue used by the "Add block" palette.
-const BLOCK_TYPES: { type: string; label: string; icon: string; make: () => any }[] = [
-  { type: 'heading', label: 'Heading', icon: '🔠', make: () => ({ type: 'heading', level: 2, text: 'New heading' }) },
-  { type: 'paragraph', label: 'Paragraph', icon: '¶', make: () => ({ type: 'paragraph', text: 'Write your text here…' }) },
-  { type: 'callout', label: 'Callout', icon: '💡', make: () => ({ type: 'callout', variant: 'tip', title: 'Tip', text: 'Highlighted note…' }) },
-  { type: 'list', label: 'Bullet list', icon: '•', make: () => ({ type: 'list', title: '', items: ['First item', 'Second item'] }) },
-  { type: 'steps', label: 'Numbered steps', icon: '🔢', make: () => ({ type: 'steps', title: 'Steps', items: ['Step one', 'Step two'] }) },
-  { type: 'image', label: 'Image', icon: '🖼️', make: () => ({ type: 'image', url: '', caption: '' }) },
-  { type: 'code', label: 'Code', icon: '💻', make: () => ({ type: 'code', language: 'python', code: '# code here', note: '' }) },
-  { type: 'example', label: 'Example', icon: '📌', make: () => ({ type: 'example', title: 'Example', text: '' }) },
-  { type: 'analogy', label: 'Analogy', icon: '🔗', make: () => ({ type: 'analogy', concept: '', analogy: '', explanation: '' }) },
-  { type: 'mistake', label: 'Common mistake', icon: '⚠️', make: () => ({ type: 'mistake', mistake: '', why: '', fix: '' }) },
-  { type: 'troubleshoot', label: 'Troubleshoot', icon: '🔧', make: () => ({ type: 'troubleshoot', problem: '', cause: '', fix: '' }) },
-  { type: 'activity', label: 'Activity', icon: '🧪', make: () => ({ type: 'activity', title: 'Activity', duration: '20 minutes', materials: [], steps: [], expected: '' }) },
-  { type: 'miniproject', label: 'Mini project', icon: '🚀', make: () => ({ type: 'miniproject', title: 'Mini Project', description: '', time: '30 minutes', materials: [], steps: [], expectedOutput: '', extensions: [] }) },
-  { type: 'industry', label: 'Industry case', icon: '🏭', make: () => ({ type: 'industry', company: '', useCase: '', impact: '' }) },
-  { type: 'quiz', label: 'Quiz', icon: '❓', make: () => ({ type: 'quiz', questions: [{ qtype: 'mcq', prompt: '', options: ['', ''], answer: '', explanation: '', difficulty: 'beginner' }] }) },
-  { type: 'figure', label: 'Figure (SVG)', icon: '📐', make: () => ({ type: 'figure', svg: '', caption: '' }) },
-];
-
-function Lbl({ children }: { children: ReactNode }) {
-  return <label style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.5, color: 'var(--muted)', display: 'block', marginBottom: 3 }}>{children}</label>;
-}
-const inputStyle: CSSProperties = { width: '100%', padding: '7px 10px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--card,#fff)', color: 'inherit', fontSize: 13 };
-
-// Editor for a single block, dispatched by type.
-function BlockFields({ block, onChange }: { block: any; onChange: (b: any) => void }) {
-  const set = (patch: any) => onChange({ ...block, ...patch });
-  switch (block.type) {
-    case 'heading':
-      return (
-        <div className="grid2" style={{ gap: 8 }}>
-          <div><Lbl>Level</Lbl>
-            <select style={inputStyle} value={block.level || 2} onChange={(e) => set({ level: Number(e.target.value) })}>
-              <option value={1}>H1 (title)</option><option value={2}>H2 (section)</option><option value={3}>H3 (sub)</option>
-            </select>
-          </div>
-          <div style={{ gridColumn: '1 / span 2' }}><Lbl>Text</Lbl><input style={inputStyle} value={block.text || ''} onChange={(e) => set({ text: e.target.value })} /></div>
-        </div>
-      );
-    case 'paragraph':
-      return <div><Lbl>Text</Lbl><textarea style={{ ...inputStyle, minHeight: 80 }} value={block.text || ''} onChange={(e) => set({ text: e.target.value })} /></div>;
-    case 'callout':
-      return (
-        <div className="grid" style={{ gap: 8 }}>
-          <div className="grid2" style={{ gap: 8 }}>
-            <div><Lbl>Variant</Lbl>
-              <select style={inputStyle} value={block.variant || 'tip'} onChange={(e) => set({ variant: e.target.value })}>
-                {['tip', 'concept', 'logic', 'realworld', 'warning', 'curiosity', 'objective', 'story', 'industry', 'project', 'revision'].map((v) => <option key={v} value={v}>{v}</option>)}
-              </select>
-            </div>
-            <div><Lbl>Title</Lbl><input style={inputStyle} value={block.title || ''} onChange={(e) => set({ title: e.target.value })} /></div>
-          </div>
-          <div><Lbl>Text</Lbl><textarea style={{ ...inputStyle, minHeight: 70 }} value={block.text || ''} onChange={(e) => set({ text: e.target.value })} /></div>
-        </div>
-      );
-    case 'list':
-    case 'steps':
-      return (
-        <div className="grid" style={{ gap: 8 }}>
-          <div><Lbl>Title (optional)</Lbl><input style={inputStyle} value={block.title || ''} onChange={(e) => set({ title: e.target.value })} /></div>
-          <div><Lbl>Items (one per line)</Lbl><textarea style={{ ...inputStyle, minHeight: 90 }} value={arrToLines(block.items)} onChange={(e) => set({ items: linesToArr(e.target.value) })} /></div>
-        </div>
-      );
-    case 'image':
-      return (
-        <div className="grid" style={{ gap: 8 }}>
-          <div><Lbl>Image URL</Lbl><input style={inputStyle} value={block.url || ''} onChange={(e) => set({ url: e.target.value })} placeholder="https://… or data:image/png;base64,…" /></div>
-          <div><Lbl>Caption</Lbl><input style={inputStyle} value={block.caption || ''} onChange={(e) => set({ caption: e.target.value })} /></div>
-          {block.url && <img src={block.url} alt="" style={{ maxWidth: 200, borderRadius: 8 }} />}
-        </div>
-      );
-    case 'code':
-      return (
-        <div className="grid" style={{ gap: 8 }}>
-          <div className="grid2" style={{ gap: 8 }}>
-            <div><Lbl>Language</Lbl><input style={inputStyle} value={block.language || ''} onChange={(e) => set({ language: e.target.value })} /></div>
-            <div><Lbl>Note (optional)</Lbl><input style={inputStyle} value={block.note || ''} onChange={(e) => set({ note: e.target.value })} /></div>
-          </div>
-          <div><Lbl>Code</Lbl><textarea style={{ ...inputStyle, minHeight: 120, fontFamily: 'ui-monospace, monospace' }} value={block.code || ''} onChange={(e) => set({ code: e.target.value })} spellCheck={false} /></div>
-        </div>
-      );
-    case 'example':
-      return (
-        <div className="grid" style={{ gap: 8 }}>
-          <div><Lbl>Title</Lbl><input style={inputStyle} value={block.title || ''} onChange={(e) => set({ title: e.target.value })} /></div>
-          <div><Lbl>Text</Lbl><textarea style={{ ...inputStyle, minHeight: 70 }} value={block.text || ''} onChange={(e) => set({ text: e.target.value })} /></div>
-        </div>
-      );
-    case 'analogy':
-      return (
-        <div className="grid" style={{ gap: 8 }}>
-          <div><Lbl>Concept</Lbl><input style={inputStyle} value={block.concept || ''} onChange={(e) => set({ concept: e.target.value })} /></div>
-          <div><Lbl>Analogy (think of it like…)</Lbl><input style={inputStyle} value={block.analogy || ''} onChange={(e) => set({ analogy: e.target.value })} /></div>
-          <div><Lbl>Explanation</Lbl><textarea style={{ ...inputStyle, minHeight: 60 }} value={block.explanation || ''} onChange={(e) => set({ explanation: e.target.value })} /></div>
-        </div>
-      );
-    case 'mistake':
-      return (
-        <div className="grid" style={{ gap: 8 }}>
-          <div><Lbl>Mistake</Lbl><input style={inputStyle} value={block.mistake || ''} onChange={(e) => set({ mistake: e.target.value })} /></div>
-          <div><Lbl>Why it happens</Lbl><textarea style={{ ...inputStyle, minHeight: 50 }} value={block.why || ''} onChange={(e) => set({ why: e.target.value })} /></div>
-          <div><Lbl>Fix</Lbl><textarea style={{ ...inputStyle, minHeight: 50 }} value={block.fix || ''} onChange={(e) => set({ fix: e.target.value })} /></div>
-        </div>
-      );
-    case 'troubleshoot':
-      return (
-        <div className="grid" style={{ gap: 8 }}>
-          <div><Lbl>Problem</Lbl><input style={inputStyle} value={block.problem || ''} onChange={(e) => set({ problem: e.target.value })} /></div>
-          <div><Lbl>Cause</Lbl><textarea style={{ ...inputStyle, minHeight: 50 }} value={block.cause || ''} onChange={(e) => set({ cause: e.target.value })} /></div>
-          <div><Lbl>Fix</Lbl><textarea style={{ ...inputStyle, minHeight: 50 }} value={block.fix || ''} onChange={(e) => set({ fix: e.target.value })} /></div>
-        </div>
-      );
-    case 'activity':
-      return (
-        <div className="grid" style={{ gap: 8 }}>
-          <div className="grid2" style={{ gap: 8 }}>
-            <div><Lbl>Title</Lbl><input style={inputStyle} value={block.title || ''} onChange={(e) => set({ title: e.target.value })} /></div>
-            <div><Lbl>Duration</Lbl><input style={inputStyle} value={block.duration || ''} onChange={(e) => set({ duration: e.target.value })} /></div>
-          </div>
-          <div><Lbl>Materials (one per line)</Lbl><textarea style={{ ...inputStyle, minHeight: 60 }} value={arrToLines(block.materials)} onChange={(e) => set({ materials: linesToArr(e.target.value) })} /></div>
-          <div><Lbl>Steps (one per line)</Lbl><textarea style={{ ...inputStyle, minHeight: 80 }} value={arrToLines(block.steps)} onChange={(e) => set({ steps: linesToArr(e.target.value) })} /></div>
-          <div><Lbl>Expected result</Lbl><textarea style={{ ...inputStyle, minHeight: 50 }} value={block.expected || ''} onChange={(e) => set({ expected: e.target.value })} /></div>
-        </div>
-      );
-    case 'miniproject':
-      return (
-        <div className="grid" style={{ gap: 8 }}>
-          <div className="grid2" style={{ gap: 8 }}>
-            <div><Lbl>Title</Lbl><input style={inputStyle} value={block.title || ''} onChange={(e) => set({ title: e.target.value })} /></div>
-            <div><Lbl>Time</Lbl><input style={inputStyle} value={block.time || ''} onChange={(e) => set({ time: e.target.value })} /></div>
-          </div>
-          <div><Lbl>Description</Lbl><textarea style={{ ...inputStyle, minHeight: 60 }} value={block.description || ''} onChange={(e) => set({ description: e.target.value })} /></div>
-          <div><Lbl>Materials (one per line)</Lbl><textarea style={{ ...inputStyle, minHeight: 50 }} value={arrToLines(block.materials)} onChange={(e) => set({ materials: linesToArr(e.target.value) })} /></div>
-          <div><Lbl>Steps (one per line)</Lbl><textarea style={{ ...inputStyle, minHeight: 70 }} value={arrToLines(block.steps)} onChange={(e) => set({ steps: linesToArr(e.target.value) })} /></div>
-          <div><Lbl>Expected output</Lbl><textarea style={{ ...inputStyle, minHeight: 50 }} value={block.expectedOutput || ''} onChange={(e) => set({ expectedOutput: e.target.value })} /></div>
-          <div><Lbl>Extensions (one per line)</Lbl><textarea style={{ ...inputStyle, minHeight: 50 }} value={arrToLines(block.extensions)} onChange={(e) => set({ extensions: linesToArr(e.target.value) })} /></div>
-        </div>
-      );
-    case 'industry':
-      return (
-        <div className="grid" style={{ gap: 8 }}>
-          <div><Lbl>Company</Lbl><input style={inputStyle} value={block.company || ''} onChange={(e) => set({ company: e.target.value })} /></div>
-          <div><Lbl>Use case</Lbl><textarea style={{ ...inputStyle, minHeight: 50 }} value={block.useCase || ''} onChange={(e) => set({ useCase: e.target.value })} /></div>
-          <div><Lbl>Impact</Lbl><input style={inputStyle} value={block.impact || ''} onChange={(e) => set({ impact: e.target.value })} /></div>
-        </div>
-      );
-    case 'figure':
-      return (
-        <div className="grid" style={{ gap: 8 }}>
-          <div><Lbl>SVG markup</Lbl><textarea style={{ ...inputStyle, minHeight: 100, fontFamily: 'ui-monospace, monospace' }} value={block.svg || ''} onChange={(e) => set({ svg: e.target.value })} spellCheck={false} /></div>
-          <div><Lbl>Caption</Lbl><input style={inputStyle} value={block.caption || ''} onChange={(e) => set({ caption: e.target.value })} /></div>
-        </div>
-      );
-    case 'quiz':
-      return <QuizFields block={block} onChange={onChange} />;
-    default:
-      return (
-        <div>
-          <Lbl>Raw JSON for this block</Lbl>
-          <textarea
-            style={{ ...inputStyle, minHeight: 100, fontFamily: 'ui-monospace, monospace' }}
-            defaultValue={JSON.stringify(block, null, 2)}
-            onBlur={(e) => { try { onChange(JSON.parse(e.target.value)); } catch { /* ignore */ } }}
-          />
-        </div>
-      );
-  }
-}
-
-function QuizFields({ block, onChange }: { block: any; onChange: (b: any) => void }) {
-  const questions: any[] = block.questions || [];
-  const setQ = (i: number, patch: any) => {
-    const next = questions.map((q, idx) => (idx === i ? { ...q, ...patch } : q));
-    onChange({ ...block, questions: next });
-  };
-  const addQ = () => onChange({ ...block, questions: [...questions, { qtype: 'mcq', prompt: '', options: ['', ''], answer: '', explanation: '', difficulty: 'beginner' }] });
-  const delQ = (i: number) => onChange({ ...block, questions: questions.filter((_, idx) => idx !== i) });
-
-  return (
-    <div className="grid" style={{ gap: 10 }}>
-      {questions.map((q, i) => (
-        <div key={i} style={{ border: '1px solid var(--border)', borderRadius: 8, padding: 10 }}>
-          <div className="row between" style={{ marginBottom: 6 }}>
-            <b style={{ fontSize: 12 }}>Question {i + 1}</b>
-            <button className="btn danger sm" onClick={() => delQ(i)}>🗑</button>
-          </div>
-          <div className="grid2" style={{ gap: 8, marginBottom: 6 }}>
-            <div><Lbl>Type</Lbl>
-              <select style={inputStyle} value={q.qtype || 'mcq'} onChange={(e) => setQ(i, { qtype: e.target.value })}>
-                {['mcq', 'oneliner', 'brain_teaser', 'tinkering', 'computational', 'logical'].map((t) => <option key={t} value={t}>{t}</option>)}
-              </select>
-            </div>
-            <div><Lbl>Difficulty</Lbl>
-              <select style={inputStyle} value={q.difficulty || 'beginner'} onChange={(e) => setQ(i, { difficulty: e.target.value })}>
-                {['beginner', 'intermediate', 'advanced'].map((t) => <option key={t} value={t}>{t}</option>)}
-              </select>
-            </div>
-          </div>
-          <div style={{ marginBottom: 6 }}><Lbl>Prompt</Lbl><textarea style={{ ...inputStyle, minHeight: 50 }} value={q.prompt || ''} onChange={(e) => setQ(i, { prompt: e.target.value })} /></div>
-          <div style={{ marginBottom: 6 }}><Lbl>Options (one per line — leave blank for open-ended)</Lbl><textarea style={{ ...inputStyle, minHeight: 50 }} value={arrToLines(q.options)} onChange={(e) => setQ(i, { options: linesToArr(e.target.value) })} /></div>
-          <div className="grid2" style={{ gap: 8 }}>
-            <div><Lbl>Answer</Lbl><input style={inputStyle} value={q.answer || ''} onChange={(e) => setQ(i, { answer: e.target.value })} /></div>
-            <div><Lbl>Explanation</Lbl><input style={inputStyle} value={q.explanation || ''} onChange={(e) => setQ(i, { explanation: e.target.value })} /></div>
-          </div>
-        </div>
-      ))}
-      <button className="btn ghost sm" onClick={addQ} style={{ justifySelf: 'start' }}>➕ Add question</button>
-    </div>
-  );
-}
-
-// One collapsible/editable block card with reorder + duplicate + delete controls.
-function BlockCard({ block, index, total, onChange, onMove, onDuplicate, onDelete }: {
-  block: any; index: number; total: number;
-  onChange: (b: any) => void; onMove: (dir: -1 | 1) => void; onDuplicate: () => void; onDelete: () => void;
-}) {
-  const [open, setOpen] = useState(true);
-  const meta = BLOCK_TYPES.find((b) => b.type === block.type);
-  const titlePreview = block.text || block.title || block.prompt || block.concept || block.problem || block.mistake || block.company || (block.questions ? `${block.questions.length} question(s)` : block.type);
-  return (
-    <div className="card" style={{ padding: 0, overflow: 'hidden', border: '1px solid var(--border)' }}>
-      <div className="row between" style={{ padding: '8px 12px', background: 'rgba(99,102,241,0.06)', gap: 8 }}>
-        <button className="btn ghost sm" onClick={() => setOpen((o) => !o)} style={{ flex: 1, textAlign: 'left', justifyContent: 'flex-start' }}>
-          <span style={{ marginRight: 8 }}>{meta?.icon || '📦'}</span>
-          <b style={{ fontSize: 13, textTransform: 'capitalize' }}>{block.type}</b>
-          <span className="muted" style={{ fontSize: 12, marginLeft: 8, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 280, display: 'inline-block', verticalAlign: 'bottom' }}>
-            {typeof titlePreview === 'string' ? titlePreview.slice(0, 60) : ''}
-          </span>
-        </button>
-        <div className="row" style={{ gap: 3 }}>
-          <button className="btn ghost sm" title="Move up" disabled={index === 0} onClick={() => onMove(-1)}>↑</button>
-          <button className="btn ghost sm" title="Move down" disabled={index === total - 1} onClick={() => onMove(1)}>↓</button>
-          <button className="btn ghost sm" title="Duplicate" onClick={onDuplicate}>⧉</button>
-          <button className="btn danger sm" title="Delete" onClick={onDelete}>🗑</button>
-        </div>
-      </div>
-      {open && <div style={{ padding: 12 }}><BlockFields block={block} onChange={onChange} /></div>}
-    </div>
-  );
-}
-
-function ChapterContentEditor({ chapter, onClose, onSave }: { chapter: any; onClose: () => void; onSave: (blocks: any[]) => void }) {
-  const [loaded, setLoaded] = useState(false);
-  const [blocks, setBlocks] = useState<any[]>([]);
-  const [mode, setMode] = useState<'visual' | 'preview' | 'json'>('visual');
-  const [saving, setSaving] = useState(false);
-  const [showPalette, setShowPalette] = useState(false);
-  const [json, setJson] = useState('');
-  const [jsonErr, setJsonErr] = useState('');
-
-  useEffect(() => {
-    apiGet<any>(`/content/chapters/${chapter.id}`).then((d) => {
-      const b = Array.isArray(d.chapter.content) ? d.chapter.content : [];
-      setBlocks(b); setJson(JSON.stringify(b, null, 2)); setLoaded(true);
-    }).catch(() => setLoaded(true));
-  }, [chapter.id]);
-
-  function updateBlock(i: number, b: any) { setBlocks((prev) => prev.map((x, idx) => (idx === i ? b : x))); }
-  function moveBlock(i: number, dir: -1 | 1) {
-    setBlocks((prev) => {
-      const j = i + dir; if (j < 0 || j >= prev.length) return prev;
-      const next = [...prev]; [next[i], next[j]] = [next[j], next[i]]; return next;
-    });
-  }
-  function duplicateBlock(i: number) { setBlocks((prev) => { const next = [...prev]; next.splice(i + 1, 0, JSON.parse(JSON.stringify(prev[i]))); return next; }); }
-  function deleteBlock(i: number) { setBlocks((prev) => prev.filter((_, idx) => idx !== i)); }
-  function addBlock(maker: () => any) { setBlocks((prev) => [...prev, maker()]); setShowPalette(false); }
-
-  function switchMode(next: 'visual' | 'preview' | 'json') {
-    if (mode === 'json' && next !== 'json') {
-      // sync json -> blocks
-      try { const parsed = JSON.parse(json); if (Array.isArray(parsed)) { setBlocks(parsed); setJsonErr(''); } else { setJsonErr('Must be an array'); return; } }
-      catch (e: any) { setJsonErr(e.message); return; }
-    }
-    if (next === 'json') setJson(JSON.stringify(blocks, null, 2));
-    setMode(next);
-  }
-
-  async function handleSave() {
-    let finalBlocks = blocks;
-    if (mode === 'json') {
-      try { const parsed = JSON.parse(json); if (!Array.isArray(parsed)) { setJsonErr('Must be an array'); return; } finalBlocks = parsed; }
-      catch (e: any) { setJsonErr(e.message); return; }
-    }
-    setSaving(true);
-    try { await onSave(finalBlocks); } finally { setSaving(false); }
-  }
-
-  return (
-    <div className="modal-bg" onClick={onClose}>
-      <div className="card modal" onClick={(e) => e.stopPropagation()}
-        style={{ maxWidth: 1080, width: '96vw', maxHeight: '94vh', display: 'flex', flexDirection: 'column', padding: 0, overflow: 'hidden' }}>
-        {/* Header */}
-        <div className="row between" style={{ padding: '14px 20px', borderBottom: '1px solid var(--border)', flexShrink: 0 }}>
-          <div>
-            <h3 style={{ margin: 0 }}>📝 Content Studio — {chapter.title}</h3>
-            <div className="muted" style={{ fontSize: 12, marginTop: 3 }}>{blocks.length} blocks · drag-free reorder, friendly forms & live preview</div>
-          </div>
-          <button className="modal-x" onClick={onClose}>✕</button>
-        </div>
-
-        {/* Toolbar */}
-        <div className="row between" style={{ padding: '8px 20px', borderBottom: '1px solid var(--border)', gap: 8, flexShrink: 0, flexWrap: 'wrap' }}>
-          <div className="row" style={{ gap: 6 }}>
-            {(['visual', 'preview', 'json'] as const).map((m) => (
-              <button key={m} className={`btn sm ${mode === m ? '' : 'ghost'}`} onClick={() => switchMode(m)} style={{ textTransform: 'capitalize' }}>
-                {m === 'visual' ? '🧱 Visual' : m === 'preview' ? '👁 Preview' : '{ } JSON'}
-              </button>
-            ))}
-          </div>
-          {mode === 'visual' && (
-            <button className="btn sm" onClick={() => setShowPalette((s) => !s)}>➕ Add block</button>
-          )}
-        </div>
-
-        {/* Add-block palette */}
-        {mode === 'visual' && showPalette && (
-          <div style={{ padding: '10px 20px', borderBottom: '1px solid var(--border)', display: 'flex', flexWrap: 'wrap', gap: 6, flexShrink: 0, background: 'rgba(255,255,255,0.02)' }}>
-            {BLOCK_TYPES.map((bt) => (
-              <button key={bt.type} className="btn ghost sm" onClick={() => addBlock(bt.make)} title={`Add ${bt.label}`}>
-                <span style={{ marginRight: 5 }}>{bt.icon}</span>{bt.label}
-              </button>
-            ))}
-          </div>
-        )}
-
-        {/* Body */}
-        <div style={{ flex: 1, overflowY: 'auto', padding: 16 }}>
-          {!loaded && <div className="spinner" />}
-
-          {loaded && mode === 'visual' && (
-            <div className="grid" style={{ gap: 10 }}>
-              {blocks.length === 0 && <div className="muted" style={{ textAlign: 'center', padding: 30 }}>No content yet. Click "➕ Add block" to start authoring.</div>}
-              {blocks.map((b, i) => (
-                <BlockCard key={i} block={b} index={i} total={blocks.length}
-                  onChange={(nb) => updateBlock(i, nb)}
-                  onMove={(dir) => moveBlock(i, dir)}
-                  onDuplicate={() => duplicateBlock(i)}
-                  onDelete={() => deleteBlock(i)} />
-              ))}
-            </div>
-          )}
-
-          {loaded && mode === 'preview' && (
-            <div className="content card pad"><Blocks blocks={blocks} /></div>
-          )}
-
-          {loaded && mode === 'json' && (
-            <div>
-              <textarea value={json} spellCheck={false}
-                onChange={(e) => { setJson(e.target.value); try { JSON.parse(e.target.value); setJsonErr(''); } catch (err: any) { setJsonErr(err.message); } }}
-                style={{ width: '100%', minHeight: '60vh', padding: 14, borderRadius: 8, border: '1px solid var(--border)', fontFamily: 'ui-monospace, monospace', fontSize: 13, lineHeight: 1.5, background: 'var(--card,#0f172a)', color: 'inherit' }} />
-              {jsonErr && <div style={{ color: '#ef4444', fontSize: 12, marginTop: 6 }}>⚠ {jsonErr}</div>}
-            </div>
-          )}
-        </div>
-
-        {/* Footer */}
-        <div className="row between" style={{ padding: '12px 20px', borderTop: '1px solid var(--border)', flexShrink: 0 }}>
-          <div className="muted" style={{ fontSize: 12 }}>{blocks.length} blocks total</div>
-          <div className="row" style={{ gap: 8 }}>
-            <button className="btn ghost" onClick={onClose}>Cancel</button>
-            <button className="btn" disabled={saving || (mode === 'json' && !!jsonErr)} onClick={handleSave}>{saving ? 'Saving…' : '💾 Save Content'}</button>
-          </div>
         </div>
       </div>
     </div>

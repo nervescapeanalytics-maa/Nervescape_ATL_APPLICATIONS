@@ -2,16 +2,19 @@
 // Supports all 17 block types including: analogy, activity, mistake, troubleshoot,
 // miniproject, industry, quiz, and revision callouts.
 import { useState } from 'react';
+import type { CSSProperties } from 'react';
 
 export interface Block {
   type: string;
   // heading / paragraph / callout / steps / list / figure / image / code / example
   level?: number;
   text?: string;
+  html?: string;
   title?: string;
   items?: string[];
   svg?: string;
   url?: string;
+  name?: string;
   caption?: string;
   language?: string;
   code?: string;
@@ -63,21 +66,31 @@ export default function Blocks({ blocks }: { blocks: Block[] }) {
   );
 }
 
+/** Render stored HTML from the Content Studio, or fall back to plain text. */
+function RichHtml({ html, text, className, style }: { html?: string; text?: string; className?: string; style?: CSSProperties }) {
+  const raw = html || (text && /<[a-z][\s\S]*>/i.test(text) ? text : '');
+  if (raw) return <div className={`rich-html ${className || ''}`} style={style} dangerouslySetInnerHTML={{ __html: raw }} />;
+  if (text) return <div className={className} style={style}>{text}</div>;
+  return null;
+}
+
 function BlockView({ b }: { b: Block }) {
   switch (b.type) {
     case 'heading':
+      if (b.html) return <RichHtml html={b.html} className="block-heading" />;
       if (b.level === 1) return <h1 style={{ marginTop: 0 }}>{b.text}</h1>;
       if (b.level === 3) return <h3>{b.text}</h3>;
       return <h2>{b.text}</h2>;
 
     case 'paragraph':
-      return <p style={{ lineHeight: 1.75 }}>{b.text}</p>;
+    case 'richtext':
+      return <RichHtml html={b.html} text={b.text} style={{ lineHeight: 1.75, marginBottom: 12 }} />;
 
     case 'callout':
       return (
         <div className={`callout ${b.variant || ''}`}>
           {b.title && <div className="title">{b.title}</div>}
-          {b.text && <div>{b.text}</div>}
+          <RichHtml html={b.html} text={b.text} />
         </div>
       );
 
@@ -128,7 +141,7 @@ function BlockView({ b }: { b: Block }) {
       return (
         <div className="callout realworld">
           {b.title && <div className="title">{b.title}</div>}
-          <div>{b.text}</div>
+          <RichHtml html={b.html} text={b.text} />
         </div>
       );
 
@@ -263,6 +276,42 @@ function BlockView({ b }: { b: Block }) {
 
     case 'quiz':
       return <InlineQuiz questions={b.questions || []} />;
+
+    case 'audio':
+      return (
+        <figure style={{ margin: '16px 0' }}>
+          <audio controls src={b.url} style={{ width: '100%' }} />
+          {b.caption && <figcaption style={{ fontSize: 12, color: 'var(--muted)', marginTop: 4 }}>{b.caption}</figcaption>}
+        </figure>
+      );
+
+    case 'video':
+      return (
+        <figure style={{ margin: '16px 0' }}>
+          <video controls src={b.url} style={{ width: '100%', maxHeight: 480, borderRadius: 10 }} />
+          {b.caption && <figcaption style={{ fontSize: 12, color: 'var(--muted)', marginTop: 4 }}>{b.caption}</figcaption>}
+        </figure>
+      );
+
+    case 'attachment':
+      return (
+        <p style={{ margin: '12px 0' }}>
+          <a href={b.url} download={b.name} className="rte-attachment" style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '8px 14px', borderRadius: 8, background: 'rgba(99,102,241,0.1)', border: '1px solid var(--border)', textDecoration: 'none', color: 'inherit' }}>
+            📎 {b.name || 'Download attachment'}
+          </a>
+        </p>
+      );
+
+    case 'canvas':
+      return (
+        <figure style={{ margin: '16px 0' }}>
+          <img src={b.url} alt={b.caption || 'Drawing'} style={{ maxWidth: '100%', borderRadius: 10, border: '1px solid var(--border)' }} />
+          {b.caption && <figcaption style={{ fontSize: 12, color: 'var(--muted)', marginTop: 4, textAlign: 'center' }}>{b.caption}</figcaption>}
+        </figure>
+      );
+
+    case 'table':
+      return <RichHtml html={b.html} style={{ margin: '12px 0', overflowX: 'auto' }} />;
 
     default:
       return b.text ? <p style={{ lineHeight: 1.75 }}>{b.text}</p> : null;
