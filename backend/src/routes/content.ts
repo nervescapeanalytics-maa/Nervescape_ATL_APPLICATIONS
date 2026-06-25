@@ -3,9 +3,30 @@ import { z } from 'zod';
 import { one, query } from '../db/pool';
 import { authenticate } from '../middleware/auth';
 import { asyncH, httpError } from '../middleware/error';
+import { generateQuestions } from '../services/ai';
 
 const router = Router();
 router.use(authenticate);
+
+// Dynamic quiz generator — produces unlimited, level-adaptive questions for any
+// topic via the configured LLM (falls back to deterministic offline questions).
+// Powers the in-lesson "dynamic_quiz" block in the AI for Everyone course.
+const genSchema = z.object({
+  topic: z.string().min(2).max(160),
+  summary: z.string().max(800).optional().default(''),
+  count: z.number().int().min(1).max(10).optional().default(5),
+  qtype: z.enum(['mcq', 'oneliner', 'brain_teaser', 'tinkering']).optional().default('mcq'),
+  difficulty: z.enum(['beginner', 'intermediate', 'advanced']).optional(),
+});
+
+router.post('/quiz/generate', asyncH(async (req, res) => {
+  const { topic, summary, count, qtype, difficulty } = genSchema.parse(req.body);
+  const ctx = difficulty
+    ? `${summary} Target difficulty: ${difficulty} (pitch the language and depth accordingly).`
+    : summary;
+  const { questions, model } = await generateQuestions(topic, ctx, count, qtype, req.user!.id);
+  res.json({ questions, model });
+}));
 
 // Grades list (auth users)
 router.get('/grades', asyncH(async (_req, res) => {

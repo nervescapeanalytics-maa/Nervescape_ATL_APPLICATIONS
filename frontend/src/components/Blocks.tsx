@@ -3,6 +3,8 @@
 // miniproject, industry, quiz, and revision callouts.
 import { useState } from 'react';
 import type { CSSProperties } from 'react';
+import { apiPost } from '../api';
+import CanvasEditor from './editor/CanvasEditor';
 
 export interface Block {
   type: string;
@@ -47,6 +49,11 @@ export interface Block {
   impact?: string;
   // quiz
   questions?: QuizQ[];
+  // media / drawboard / dynamic_quiz
+  kind?: 'audio' | 'video';
+  prompt?: string;
+  topic?: string;
+  summary?: string;
 }
 
 interface QuizQ {
@@ -277,6 +284,15 @@ function BlockView({ b }: { b: Block }) {
     case 'quiz':
       return <InlineQuiz questions={b.questions || []} />;
 
+    case 'media':
+      return <MediaBlock kind={b.kind || 'video'} url={b.url} caption={b.caption} />;
+
+    case 'drawboard':
+      return <DrawBoard prompt={b.prompt} caption={b.caption} svg={b.svg} />;
+
+    case 'dynamic_quiz':
+      return <DynamicQuiz topic={b.topic || ''} summary={b.summary || ''} />;
+
     case 'audio':
       return (
         <figure style={{ margin: '16px 0' }}>
@@ -316,6 +332,126 @@ function BlockView({ b }: { b: Block }) {
     default:
       return b.text ? <p style={{ lineHeight: 1.75 }}>{b.text}</p> : null;
   }
+}
+
+// ── Media block: real player when a URL is attached, else a friendly placeholder ──
+function MediaBlock({ kind, url, caption }: { kind: 'audio' | 'video'; url?: string; caption?: string }) {
+  if (url) {
+    return (
+      <figure style={{ margin: '16px 0' }}>
+        {kind === 'video'
+          ? <video controls src={url} style={{ width: '100%', maxHeight: 480, borderRadius: 10 }} />
+          : <audio controls src={url} style={{ width: '100%' }} />}
+        {caption && <figcaption style={{ fontSize: 12, color: 'var(--muted)', marginTop: 4, textAlign: 'center' }}>{caption}</figcaption>}
+      </figure>
+    );
+  }
+  const icon = kind === 'video' ? '🎬' : '🎧';
+  return (
+    <div style={{
+      margin: '14px 0', padding: '22px 18px', borderRadius: 12, textAlign: 'center',
+      border: '2px dashed var(--border)', background: 'rgba(99,102,241,0.04)',
+    }}>
+      <div style={{ fontSize: 34, marginBottom: 6 }}>{icon}</div>
+      <div style={{ fontWeight: 700, marginBottom: 4 }}>{kind === 'video' ? 'Video lesson' : 'Audio recap'}</div>
+      <div style={{ fontSize: 13, color: 'var(--muted)' }}>{caption}</div>
+      <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 8, fontStyle: 'italic' }}>
+        {kind === 'video' ? 'A video can be attached here.' : 'An audio clip can be attached here.'}
+      </div>
+    </div>
+  );
+}
+
+// ── Draw-it-yourself board: opens the Paint-like studio for the student ──
+function DrawBoard({ prompt, caption, svg }: { prompt?: string; caption?: string; svg?: string }) {
+  const [open, setOpen] = useState(false);
+  const [drawing, setDrawing] = useState<string | null>(null);
+  return (
+    <div style={{
+      margin: '14px 0', padding: 16, borderRadius: 12,
+      border: '1px solid var(--purple)', background: 'rgba(99,102,241,0.05)',
+    }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+        <span style={{ fontSize: 20 }}>🎨</span>
+        <span style={{ fontWeight: 700 }}>Draw it yourself</span>
+      </div>
+      {prompt && <p style={{ margin: '0 0 6px', lineHeight: 1.6 }}>{prompt}</p>}
+      {caption && <p style={{ margin: '0 0 10px', fontSize: 13, color: 'var(--muted)' }}>{caption}</p>}
+      {svg && !drawing && (
+        <figure style={{ margin: '0 0 10px' }}>
+          <div dangerouslySetInnerHTML={{ __html: svg }} style={{ maxWidth: '100%' }} />
+          <figcaption style={{ fontSize: 12, color: 'var(--muted)', textAlign: 'center' }}>Need inspiration? Here is a reference.</figcaption>
+        </figure>
+      )}
+      {drawing && (
+        <figure style={{ margin: '0 0 10px' }}>
+          <img src={drawing} alt="Your drawing" style={{ maxWidth: '100%', borderRadius: 10, border: '1px solid var(--border)' }} />
+          <figcaption style={{ fontSize: 12, color: 'var(--green)', textAlign: 'center' }}>Your drawing ✅</figcaption>
+        </figure>
+      )}
+      <button className="btn sm" onClick={() => setOpen(true)}>{drawing ? '✏️ Edit drawing' : '🖌 Open drawing studio'}</button>
+      {open && (
+        <CanvasEditor
+          initialDataUrl={drawing || undefined}
+          onSave={(d) => { setDrawing(d); setOpen(false); }}
+          onClose={() => setOpen(false)}
+        />
+      )}
+    </div>
+  );
+}
+
+// ── Dynamic quiz: unlimited, API-generated questions, level-adaptive ──
+function DynamicQuiz({ topic, summary }: { topic: string; summary: string }) {
+  const [difficulty, setDifficulty] = useState<'beginner' | 'intermediate' | 'advanced'>('beginner');
+  const [questions, setQuestions] = useState<QuizQ[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+
+  async function load() {
+    setLoading(true); setError('');
+    try {
+      const r = await apiPost<{ questions: QuizQ[] }>('/content/quiz/generate', {
+        topic, summary, count: 5, qtype: 'mcq', difficulty,
+      });
+      setQuestions(r.questions || []);
+    } catch {
+      setError('Could not generate questions right now. Please try again.');
+    } finally { setLoading(false); }
+  }
+
+  return (
+    <div style={{ margin: '16px 0', padding: '16px 18px', borderRadius: 12, border: '1px solid rgba(6,214,160,0.35)', background: 'rgba(6,214,160,0.05)' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+        <span style={{ fontSize: 20 }}>🧠</span>
+        <span style={{ fontWeight: 700 }}>Practice Quiz — unlimited questions</span>
+      </div>
+      <p style={{ margin: '0 0 12px', fontSize: 13, color: 'var(--muted)' }}>
+        Pick a level and generate fresh questions any time. Every set is different!
+      </p>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center', marginBottom: 12 }}>
+        <div style={{ display: 'flex', gap: 6 }}>
+          {(['beginner', 'intermediate', 'advanced'] as const).map((d) => (
+            <button
+              key={d}
+              onClick={() => setDifficulty(d)}
+              style={{
+                fontSize: 12, padding: '5px 12px', borderRadius: 20, cursor: 'pointer', textTransform: 'capitalize',
+                border: difficulty === d ? '1px solid var(--green)' : '1px solid var(--border)',
+                background: difficulty === d ? 'rgba(6,214,160,0.15)' : 'transparent',
+                color: difficulty === d ? 'var(--green)' : 'inherit',
+              }}
+            >{d}</button>
+          ))}
+        </div>
+        <button className="btn green sm" onClick={load} disabled={loading}>
+          {loading ? 'Generating…' : questions.length ? '🔄 New questions' : '✨ Generate quiz'}
+        </button>
+      </div>
+      {error && <div style={{ fontSize: 13, color: '#ef4444', marginBottom: 8 }}>{error}</div>}
+      {questions.length > 0 && <InlineQuiz questions={questions} />}
+    </div>
+  );
 }
 
 function InlineQuiz({ questions }: { questions: QuizQ[] }) {

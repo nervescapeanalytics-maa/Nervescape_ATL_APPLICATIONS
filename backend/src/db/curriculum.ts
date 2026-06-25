@@ -22,7 +22,11 @@ export type Block =
   | { type: 'activity'; title: string; duration: string; materials: string[]; steps: string[]; expected: string }
   | { type: 'miniproject'; title: string; description: string; time: string; materials: string[]; steps: string[]; expectedOutput: string; extensions?: string[] }
   | { type: 'industry'; company: string; useCase: string; impact: string }
-  | { type: 'quiz'; questions: QSpec[] };
+  | { type: 'quiz'; questions: QSpec[] }
+  // ── content-focused interactive blocks (AI for Everyone) ──────────
+  | { type: 'media'; kind: 'audio' | 'video'; url?: string; caption: string }
+  | { type: 'drawboard'; prompt: string; caption?: string; svg?: string }
+  | { type: 'dynamic_quiz'; topic: string; summary: string };
 
 export interface QSpec {
   qtype: 'mcq' | 'oneliner' | 'brain_teaser' | 'tinkering' | 'computational' | 'logical';
@@ -96,6 +100,12 @@ export interface ChapterSpec {
   // ── SECTION 4: Core Concept ─────────────────────────────────────
   concept: string;              // The core concept / formula
 
+  // ── Content-focused extras (used by buildConceptBlocks) ──────────
+  deeper?: string;              // Class 9-12 technical depth (auto-derived if missing)
+  useCases?: string[];          // Practical, relatable use cases (auto-derived if missing)
+  videoUrl?: string;            // Optional attached video for this chapter
+  audioUrl?: string;            // Optional attached audio for this chapter
+
   // ── SECTION 5: Did You Know ─────────────────────────────────────
   didYouKnow?: string[];        // Surprising/interesting facts (supplements facts[])
 
@@ -122,8 +132,16 @@ export interface ChapterSpec {
   // ── SECTION 12: Mini Project ─────────────────────────────────────
   miniProject?: MiniProjectSpec;
 
+  // ── SECTION 12b: Mini Challenge (quick gamified task) ────────────
+  miniChallenge?: string;       // A short challenge/game to spark engagement
+
   // ── SECTION 13: Logic & Thinking ─────────────────────────────────
   logic: string;                // Computational/logical thinking insight
+
+  // ── SECTION 13b: Discussion, Careers & Homework ──────────────────
+  discussionQuestions?: string[];  // Open-ended questions for class debate
+  careerConnections?: string[];    // How this topic links to real jobs/careers
+  homework?: string[];             // Practice / take-home tasks
 
   // ── SECTION 14: Revision Notes ───────────────────────────────────
   revisionNotes?: string[];     // Quick bullet-point revision summary
@@ -396,6 +414,12 @@ export function buildBlocks(spec: ChapterSpec): Block[] {
     b.push({ type: 'activity', ...act });
   }
 
+  // ── 10b. MINI CHALLENGE (quick gamified task) ────────────────────
+  if (spec.miniChallenge) {
+    b.push({ type: 'heading', level: 3, text: '🎯 Mini Challenge' });
+    b.push({ type: 'callout', variant: 'project', title: '⚡ Beat the Clock', text: spec.miniChallenge });
+  }
+
   // ── 11. CODE ─────────────────────────────────────────────────────
   if (spec.code) {
     b.push({ type: 'heading', level: 2, text: '💻 Code It Yourself' });
@@ -437,6 +461,26 @@ export function buildBlocks(spec: ChapterSpec): Block[] {
   // ── 15. THINK LIKE AN ENGINEER ───────────────────────────────────
   b.push({ type: 'heading', level: 2, text: '🧠 Think Like an Engineer' });
   b.push({ type: 'callout', variant: 'logic', title: 'Computational & Logical Thinking', text: spec.logic });
+
+  // ── 15b. DISCUSSION QUESTIONS ────────────────────────────────────
+  if (spec.discussionQuestions && spec.discussionQuestions.length > 0) {
+    b.push({ type: 'heading', level: 2, text: '💬 Talk About It — Discussion Questions' });
+    b.push({ type: 'callout', variant: 'tip', title: 'No wrong answers here!', text: 'Discuss these in pairs or as a class. Listen to other ideas — that is how great thinkers grow.' });
+    b.push({ type: 'list', title: '', items: spec.discussionQuestions });
+  }
+
+  // ── 15c. CAREER CONNECTIONS ──────────────────────────────────────
+  if (spec.careerConnections && spec.careerConnections.length > 0) {
+    b.push({ type: 'heading', level: 2, text: '💼 Career Connections — Jobs That Use This' });
+    b.push({ type: 'list', title: 'People who use this every day:', items: spec.careerConnections });
+  }
+
+  // ── 15d. HOMEWORK / PRACTICE ─────────────────────────────────────
+  if (spec.homework && spec.homework.length > 0) {
+    b.push({ type: 'heading', level: 2, text: '🏠 Homework & Practice Tasks' });
+    b.push({ type: 'callout', variant: 'project', title: 'Keep the spark alive', text: 'Try these at home. Bring back what you discover to share next class!' });
+    b.push({ type: 'list', title: '', items: spec.homework });
+  }
 
   // ── 16. QUICK REVISION NOTES ─────────────────────────────────────
   const revision = spec.revisionNotes ?? autoRevisionNotes(spec);
@@ -487,6 +531,101 @@ export function buildBlocks(spec: ChapterSpec): Block[] {
     b.push({ type: 'heading', level: 3, text: '✨ Amazing Facts About This Topic' });
     b.push({ type: 'list', title: '', items: spec.facts });
   }
+
+  return b;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// CONTENT-FOCUSED BUILDER — deep explanations, visuals, media & live quiz.
+// Used by the standalone "AI for Everyone" course. Deliberately drops the
+// generic template scaffolding (objectives, story heading, analogy corner,
+// did-you-know, hands-on activity, mini challenge, think-like-an-engineer,
+// discussion, careers, mini project, rubric, teacher notes, parent engagement)
+// and instead leads with real content for Class 4-8, plus a deeper layer for
+// Class 9-12, visuals, audio/video placeholders, a draw-it-yourself board and
+// an API-driven dynamic quiz.
+// ─────────────────────────────────────────────────────────────────────────────
+function deriveUseCases(spec: ChapterSpec): string[] {
+  if (spec.industryScenarios && spec.industryScenarios.length > 0) {
+    return spec.industryScenarios.map((s) => `${s.company} — ${s.useCase}`);
+  }
+  return spec.realWorld.slice(0, 5).map((r) => r);
+}
+
+function deriveDeeper(spec: ChapterSpec): string {
+  const mech = spec.howItWorks && spec.howItWorks.length
+    ? ` Step by step, under the hood: ${spec.howItWorks.join(' → ')}.`
+    : '';
+  const ind = spec.industryScenarios && spec.industryScenarios.length
+    ? ` In the real industry, ${spec.industryScenarios[0].company} applies this: ${spec.industryScenarios[0].useCase} (${spec.industryScenarios[0].impact}).`
+    : '';
+  const logic = spec.logic ? ` The thinking pattern behind it: ${spec.logic}` : '';
+  return `${spec.concept}${mech}${ind}${logic}`;
+}
+
+export function buildConceptBlocks(spec: ChapterSpec): Block[] {
+  const b: Block[] = [];
+
+  // 1) Title + an engaging, story-led introduction (flowing prose, no label)
+  b.push({ type: 'heading', level: 1, text: spec.title });
+  const intro = [spec.hook, spec.story ?? ''].filter(Boolean).join(' ');
+  if (intro) b.push({ type: 'paragraph', text: intro });
+
+  // 2) The core explanation in simple, Class 4-8 friendly language
+  b.push({ type: 'heading', level: 2, text: 'Understanding it simply' });
+  b.push({ type: 'paragraph', text: spec.layman });
+  if (spec.howItWorks && spec.howItWorks.length > 0) {
+    b.push({ type: 'paragraph', text: `Here is the idea broken into a simple chain: ${spec.howItWorks.join(' → ')}.` });
+  }
+
+  // 3) A primary visual (diagram / flowchart / infographic)
+  b.push({ type: 'figure', svg: DIAGRAMS[spec.diagram], caption: `A visual overview of ${spec.title}.` });
+
+  // 4) Analogies woven in as content (only where authored)
+  for (const a of spec.analogies ?? []) {
+    b.push({ type: 'analogy', concept: a.concept, analogy: a.analogy, explanation: a.explanation });
+  }
+
+  // 5) Everyday, real-life examples
+  if (spec.realWorld.length > 0) {
+    b.push({ type: 'heading', level: 2, text: 'Real-life examples you already know' });
+    b.push({ type: 'list', items: spec.realWorld });
+  }
+
+  // 6) Practical use cases students can relate to
+  const useCases = spec.useCases ?? deriveUseCases(spec);
+  if (useCases.length > 0) {
+    b.push({ type: 'heading', level: 2, text: 'Where it is actually used' });
+    b.push({ type: 'list', items: useCases });
+  }
+
+  // 7) Optional code (coding / project lessons)
+  if (spec.code) {
+    b.push({ type: 'heading', level: 2, text: 'Try it in code' });
+    if (spec.code.note) b.push({ type: 'paragraph', text: spec.code.note });
+    b.push({ type: 'code', language: spec.code.language, code: spec.code.code });
+  }
+
+  // 8) Going deeper — technical depth for Class 9 to 12
+  const deeper = spec.deeper ?? deriveDeeper(spec);
+  b.push({ type: 'heading', level: 2, text: '🎓 Going Deeper — for Class 9 to 12' });
+  b.push({ type: 'callout', variant: 'concept', title: 'The technical view', text: deeper });
+
+  // 9) Media: audio + video (real player if a URL is attached, else a placeholder)
+  b.push({ type: 'heading', level: 2, text: 'Watch & listen' });
+  b.push({ type: 'media', kind: 'video', url: spec.videoUrl, caption: `Video explainer for ${spec.title}.` });
+  b.push({ type: 'media', kind: 'audio', url: spec.audioUrl, caption: `Audio recap of ${spec.title}.` });
+
+  // 10) Interactive: draw-it-yourself board (Paint-like studio)
+  b.push({
+    type: 'drawboard',
+    prompt: `Draw your own picture of "${spec.title}". Sketch how it works in your own way!`,
+    caption: 'Open the drawing studio and explain the idea visually.',
+    svg: DIAGRAMS[spec.diagram],
+  });
+
+  // 11) Dynamic, API-generated quiz (unlimited, level-adaptive)
+  b.push({ type: 'dynamic_quiz', topic: spec.title, summary: spec.summary || spec.layman.slice(0, 200) });
 
   return b;
 }

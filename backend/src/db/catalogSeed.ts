@@ -1,4 +1,9 @@
 import { pool, one, query } from './pool';
+import { buildConceptBlocks } from './curriculum';
+import { aiForEveryoneCourse } from './aiForEveryone';
+
+const slugify = (s: string) =>
+  s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 80);
 
 const LEVELS = [
   { name: 'AI Sprouts', slug: 'ai-sprouts', order: 1, grade: 3 },
@@ -89,8 +94,54 @@ export async function importModulesToCatalog(adminId?: string | null) {
   return imported;
 }
 
+/**
+ * Seed the standalone, age-agnostic "AI for Everyone" course directly into
+ * the central catalog (idempotent). It lives under its own "AI for Everyone"
+ * learning level and is NOT tied to any single class — anyone can take it.
+ */
+export async function seedAiForEveryone(adminId?: string | null) {
+  // 1) A dedicated, standalone learning level for this open course.
+  await pool.query(
+    `INSERT INTO curriculum_levels (name, slug, description, order_index)
+     VALUES ($1,$2,$3,$4)
+     ON CONFLICT (slug) DO UPDATE SET name=EXCLUDED.name, description=EXCLUDED.description`,
+    ['AI for Everyone', 'ai-for-everyone', 'A standalone, all-ages AI course open to every learner — not tied to any class.', 99]
+  );
+  const level = await one<any>(`SELECT id FROM curriculum_levels WHERE slug=$1`, ['ai-for-everyone']);
+  const levelId = level?.id ?? null;
+
+  // 2) The catalog course itself (published, ready to read / deploy anywhere).
+  const course = aiForEveryoneCourse();
+  const cat = await one<any>(
+    `INSERT INTO course_catalog (level_id, title, slug, icon, color, description, status, order_index, created_by, updated_by)
+     VALUES ($1,$2,$3,$4,$5,$6,'published',0,$7,$7)
+     ON CONFLICT (slug) DO UPDATE SET title=EXCLUDED.title, level_id=EXCLUDED.level_id,
+       icon=EXCLUDED.icon, color=EXCLUDED.color, description=EXCLUDED.description, status='published'
+     RETURNING id`,
+    [levelId, course.title, course.slug, course.icon, course.color, course.description, adminId]
+  );
+  const catalogId = cat!.id as number;
+
+  // 3) Every lesson → a catalog chapter (content-focused blocks).
+  let order = 0;
+  for (const ch of course.chapters) {
+    const blocks = buildConceptBlocks(ch);
+    const chSlug = slugify(ch.title);
+    await pool.query(
+      `INSERT INTO catalog_chapters (catalog_id, title, slug, summary, difficulty, est_minutes, content, order_index, is_published)
+       VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb,$8,TRUE)
+       ON CONFLICT (catalog_id, slug) DO UPDATE SET title=EXCLUDED.title, summary=EXCLUDED.summary,
+         difficulty=EXCLUDED.difficulty, est_minutes=EXCLUDED.est_minutes, content=EXCLUDED.content,
+         order_index=EXCLUDED.order_index`,
+      [catalogId, ch.title, chSlug, ch.summary, ch.difficulty, ch.est, JSON.stringify(blocks), order++]
+    );
+  }
+  console.log(`[seed] "AI for Everyone" standalone course ready: ${course.chapters.length} lessons in the catalog`);
+}
+
 export async function seedCatalogRepository(adminId?: string | null) {
   await seedCurriculumLevels();
   const n = await importModulesToCatalog(adminId);
-  console.log(`[seed] course repository: ${LEVELS.length} levels, ${n} courses imported to catalog`);
+  await seedAiForEveryone(adminId);
+  console.log(`[seed] course repository: ${LEVELS.length + 1} levels, ${n} courses imported to catalog (+ AI for Everyone)`);
 }
