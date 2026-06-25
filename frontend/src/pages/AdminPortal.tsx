@@ -38,7 +38,6 @@ export default function AdminPortal() {
       ]}
       tabs={[
         { key: 'overview', label: 'Control Center', icon: '🏠', group: 'Overview' },
-        { key: 'activity', label: 'Activity Feed', icon: '🕒', group: 'Governance' },
         { key: 'repository', label: 'Course Repository', icon: '🗄️', group: 'Academics' },
         { key: 'levels', label: 'Learning Levels', icon: '📊', group: 'Academics' },
         { key: 'curriculum', label: 'Curriculum Library', icon: '🗂️', group: 'Academics' },
@@ -49,15 +48,16 @@ export default function AdminPortal() {
         { key: 'teachers', label: 'Teachers', icon: '👩‍🏫', group: 'People' },
         { key: 'students', label: 'Students', icon: '🎒', group: 'People' },
         { key: 'parents', label: 'Parents', icon: '👪', group: 'People' },
+        { key: 'roles', label: 'Teaching Roles', icon: '🎭', group: 'People' },
         { key: 'schools', label: 'Schools', icon: '🏣', group: 'Operations' },
         { key: 'live', label: 'Live Classes', icon: '📡', group: 'Operations' },
         { key: 'finance', label: 'Finance', icon: '💰', group: 'Operations' },
+        { key: 'ai', label: 'AI Platform', icon: '🤖', group: 'System' },
+        { key: 'activity', label: 'Activity Feed', icon: '🕒', group: 'Governance' },
         { key: 'reports', label: 'Reports', icon: '📈', group: 'Governance' },
         { key: 'audit', label: 'Audit Log', icon: '🔍', group: 'Governance' },
-        { key: 'roles', label: 'Teaching Roles', icon: '🎭', group: 'People' },
         { key: 'iam', label: 'Access Control', icon: '🔐', group: 'Governance' },
         { key: 'retention', label: 'Data Retention', icon: '🗄️', group: 'Governance' },
-        { key: 'ai', label: 'AI Platform', icon: '🤖', group: 'System' },
       ]}
     >
       {tab === 'overview' && <Overview go={goTab} />}

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { apiGet, apiPost, apiPut, apiDel } from '../../api';
+import { apiGet, apiPost, apiPut, apiPatch, apiDel } from '../../api';
 import ContentStudio from '../editor/ContentStudio';
 
 function Panel({ title, icon, sub, action, children }: any) {
@@ -23,6 +23,10 @@ export default function CourseRepository() {
   const [detail, setDetail] = useState<any>(null);
   const [editCourse, setEditCourse] = useState<any>(null);
   const [editContent, setEditContent] = useState<any>(null);
+  const [addPicker, setAddPicker] = useState(false);
+  const [pickerCourses, setPickerCourses] = useState<any[]>([]);
+  const [pickerQ, setPickerQ] = useState('');
+  const [selected, setSelected] = useState<Set<number>>(new Set());
   const [msg, setMsg] = useState('');
   const [busy, setBusy] = useState(false);
 
@@ -43,8 +47,47 @@ export default function CourseRepository() {
   }
 
   useEffect(() => { loadOverview(); loadGrades(); }, []);
-  useEffect(() => { loadCourses(); }, [selLevel]);
+  useEffect(() => { loadCourses(); setSelected(new Set()); }, [selLevel]);
   useEffect(() => { if (selCourse?.id) loadDetail(selCourse.id); else setDetail(null); }, [selCourse?.id]);
+
+  async function setCourseLevel(courseId: number, levelId: number | null) {
+    await apiPatch(`/admin/catalog/courses/${courseId}/level`, { level_id: levelId });
+  }
+
+  async function removeSelectedFromLevel() {
+    if (selLevel === 'all' || selected.size === 0) return;
+    const n = selected.size;
+    if (!confirm(`Remove ${n} course(s) from this learning level?`)) return;
+    setBusy(true);
+    try {
+      await Promise.all([...selected].map((id) => setCourseLevel(id, null)));
+      setSelected(new Set());
+      flash(`${n} course(s) removed from level.`);
+      loadCourses(); loadOverview();
+    } catch (e: any) { alert(e?.message || 'Bulk remove failed'); }
+    finally { setBusy(false); }
+  }
+
+  async function removeFromLevel(courseId: number, title: string) {
+    if (!confirm(`Remove "${title}" from this learning level?\n\nThe course stays in the repository (unassigned).`)) return;
+    setBusy(true);
+    try {
+      await setCourseLevel(courseId, null);
+      if (selCourse?.id === courseId) setSelCourse(null);
+      flash('Course removed from level.');
+      loadCourses(); loadOverview();
+    } catch (e: any) { alert(e?.message || 'Could not remove course'); }
+    finally { setBusy(false); }
+  }
+
+  function openAddPicker() {
+    if (selLevel === 'all') return;
+    apiGet<any>('/admin/catalog/courses').then((r) => {
+      setPickerCourses(r.courses.filter((c: any) => c.level_id !== selLevel));
+      setPickerQ('');
+      setAddPicker(true);
+    }).catch(() => alert('Could not load courses'));
+  }
 
   async function saveCourse(d: any) {
     try {
@@ -62,6 +105,17 @@ export default function CourseRepository() {
       if (selCourse?.id === id) setSelCourse(null);
       flash('Course removed.'); loadCourses(); loadOverview();
     } catch (e: any) { alert(e?.message || 'Delete failed'); }
+  }
+
+  async function changeDetailLevel(levelId: number | null) {
+    if (!detail?.course) return;
+    setBusy(true);
+    try {
+      await setCourseLevel(detail.course.id, levelId);
+      flash(levelId ? 'Learning level updated.' : 'Course unassigned from level.');
+      loadDetail(detail.course.id); loadCourses(); loadOverview();
+    } catch (e: any) { alert(e?.message || 'Level update failed'); }
+    finally { setBusy(false); }
   }
 
   async function toggleMapping(gradeId: number, mapped: boolean) {
@@ -106,8 +160,21 @@ export default function CourseRepository() {
     } catch (e: any) { alert(e?.message || 'Failed'); }
   }
 
+  function toggleSelect(id: number) {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  }
+
   const levels = overview?.levels || [];
   const stats = overview?.stats || {};
+  const levelName = selLevel === 'all' ? 'All courses' : levels.find((l: any) => l.id === selLevel)?.name;
+  const pickerFiltered = pickerCourses.filter((c) =>
+    !pickerQ.trim() || c.title.toLowerCase().includes(pickerQ.toLowerCase())
+    || (c.level_name || '').toLowerCase().includes(pickerQ.toLowerCase())
+  );
 
   return (
     <div className="grid repo-wrap">
@@ -137,7 +204,6 @@ export default function CourseRepository() {
       {msg && <div className="card pad" style={{ background: '#e8f5e9', color: '#1b5e20', fontSize: 14 }}>{msg}</div>}
 
       <div className="repo-layout">
-        {/* Level sidebar */}
         <aside className="card pad repo-sidebar">
           <h4 style={{ margin: '0 0 10px', fontSize: 13, textTransform: 'uppercase', letterSpacing: 0.5, color: 'var(--muted)' }}>Learning levels</h4>
           <button type="button" className={`repo-level-btn${selLevel === 'all' ? ' active' : ''}`} onClick={() => { setSelLevel('all'); setSelCourse(null); }}>
@@ -150,38 +216,81 @@ export default function CourseRepository() {
               <span className="repo-count">{lv.course_count}</span>
             </button>
           ))}
-          <button type="button" className="btn sm" style={{ width: '100%', marginTop: 12 }}
-            onClick={() => setEditCourse({ level_id: selLevel === 'all' ? levels[0]?.id : selLevel, title: '', icon: '📘', color: '#6366f1', status: 'draft' })}>
-            ➕ New course
-          </button>
+          {selLevel !== 'all' && (
+            <div className="grid" style={{ gap: 6, marginTop: 12 }}>
+              <button type="button" className="btn sm" style={{ width: '100%' }} onClick={openAddPicker}>➕ Add existing course</button>
+              <button type="button" className="btn ghost sm" style={{ width: '100%' }}
+                onClick={() => setEditCourse({ level_id: selLevel, title: '', icon: '📘', color: '#6366f1', status: 'draft' })}>
+                ➕ New course
+              </button>
+            </div>
+          )}
+          {selLevel === 'all' && (
+            <button type="button" className="btn sm" style={{ width: '100%', marginTop: 12 }}
+              onClick={() => setEditCourse({ level_id: levels[0]?.id, title: '', icon: '📘', color: '#6366f1', status: 'draft' })}>
+              ➕ New course
+            </button>
+          )}
         </aside>
 
-        {/* Course list */}
         <section className="repo-courses">
           {!selCourse && (
             <>
-              <div className="row between" style={{ marginBottom: 12 }}>
-                <h3 style={{ margin: 0 }}>{selLevel === 'all' ? 'All courses' : levels.find((l: any) => l.id === selLevel)?.name}</h3>
-                <span className="muted" style={{ fontSize: 13 }}>{courses.length} course{courses.length !== 1 ? 's' : ''}</span>
+              <div className="row between" style={{ marginBottom: 12, flexWrap: 'wrap', gap: 8 }}>
+                <div>
+                  <h3 style={{ margin: 0 }}>{levelName}</h3>
+                  <span className="muted" style={{ fontSize: 13 }}>{courses.length} course{courses.length !== 1 ? 's' : ''}</span>
+                </div>
+                {selLevel !== 'all' && selected.size > 0 && (
+                  <button type="button" className="btn ghost sm" disabled={busy} onClick={removeSelectedFromLevel}>
+                    ⊖ Remove {selected.size} from level
+                  </button>
+                )}
               </div>
               <div className="repo-grid">
                 {courses.map((c) => (
-                  <button key={c.id} type="button" className="card pad repo-course-card" onClick={() => setSelCourse(c)}>
-                    <div className="row" style={{ gap: 10, alignItems: 'flex-start' }}>
-                      <span style={{ fontSize: 28, width: 44, height: 44, borderRadius: 10, background: c.color || '#6366f1', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>{c.icon || '📘'}</span>
-                      <div style={{ flex: 1, minWidth: 0, textAlign: 'left' }}>
-                        <b style={{ fontSize: 14 }}>{c.title}</b>
-                        <div className="muted" style={{ fontSize: 12, marginTop: 2 }}>{c.level_name || 'Unassigned level'}</div>
-                        <div className="row" style={{ gap: 8, marginTop: 8, flexWrap: 'wrap' }}>
-                          <span className="tag">{c.chapter_count} ch</span>
-                          <span className="tag">{c.mapped_classes} class{c.mapped_classes !== 1 ? 'es' : ''}</span>
-                          <span className={`tag ${c.status === 'published' ? '' : 'ghost'}`}>{c.status}</span>
+                  <div key={c.id} className={`card pad repo-course-card${selected.has(c.id) ? ' selected' : ''}`}>
+                    <div className="repo-card-actions">
+                      {selLevel !== 'all' && (
+                        <input type="checkbox" className="repo-card-check" checked={selected.has(c.id)}
+                          onChange={() => toggleSelect(c.id)} title="Select for bulk remove" />
+                      )}
+                      <button type="button" className="repo-card-body" onClick={() => setSelCourse(c)}>
+                        <div className="row" style={{ gap: 10, alignItems: 'flex-start' }}>
+                          <span className="repo-card-icon" style={{ background: c.color || '#6366f1' }}>{c.icon || '📘'}</span>
+                          <div style={{ flex: 1, minWidth: 0, textAlign: 'left' }}>
+                            <b style={{ fontSize: 14 }}>{c.title}</b>
+                            <div className="muted" style={{ fontSize: 12, marginTop: 2 }}>{c.level_name || 'Unassigned'}</div>
+                            <div className="row" style={{ gap: 8, marginTop: 8, flexWrap: 'wrap' }}>
+                              <span className="tag">{c.chapter_count} ch</span>
+                              <span className="tag">{c.mapped_classes} class{c.mapped_classes !== 1 ? 'es' : ''}</span>
+                              <span className={`tag ${c.status === 'published' ? '' : 'ghost'}`}>{c.status}</span>
+                            </div>
+                          </div>
                         </div>
-                      </div>
+                      </button>
+                      {selLevel !== 'all' && (
+                        <button type="button" className="repo-card-remove" title="Remove from this level"
+                          disabled={busy} onClick={() => removeFromLevel(c.id, c.title)}>⊖</button>
+                      )}
                     </div>
-                  </button>
+                  </div>
                 ))}
-                {courses.length === 0 && <div className="muted" style={{ padding: 24, gridColumn: '1 / -1', textAlign: 'center' }}>No courses in this level yet.</div>}
+                {courses.length === 0 && selLevel !== 'all' && (
+                  <div className="muted repo-empty" style={{ gridColumn: '1 / -1' }}>
+                    <p>No courses in this level yet.</p>
+                    <div className="row" style={{ gap: 8, justifyContent: 'center', marginTop: 8 }}>
+                      <button type="button" className="btn sm" onClick={openAddPicker}>➕ Add existing course</button>
+                      <button type="button" className="btn ghost sm"
+                        onClick={() => setEditCourse({ level_id: selLevel, title: '', icon: '📘', color: '#6366f1', status: 'draft' })}>
+                        ➕ Create new
+                      </button>
+                    </div>
+                  </div>
+                )}
+                {courses.length === 0 && selLevel === 'all' && (
+                  <div className="muted" style={{ padding: 24, gridColumn: '1 / -1', textAlign: 'center' }}>No courses in the repository yet.</div>
+                )}
               </div>
             </>
           )}
@@ -193,16 +302,28 @@ export default function CourseRepository() {
                 <div className="row" style={{ gap: 6 }}>
                   <button type="button" className="btn ghost sm" onClick={() => setEditCourse(detail.course)}>✏️ Edit</button>
                   <button type="button" className="btn sm" disabled={busy} onClick={syncCourse}>🔄 Sync to classes</button>
+                  {detail.course.level_id && (
+                    <button type="button" className="btn ghost sm" disabled={busy}
+                      onClick={() => changeDetailLevel(null)}>⊖ Unassign level</button>
+                  )}
                   <button type="button" className="btn danger sm" onClick={() => deleteCourse(detail.course.id, detail.course.title)}>🗑</button>
                 </div>
               </div>
 
               <div className="card pad" style={{ marginBottom: 14, borderLeft: `4px solid ${detail.course.color || '#6366f1'}` }}>
-                <div className="row" style={{ gap: 12, alignItems: 'center' }}>
+                <div className="row" style={{ gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
                   <span style={{ fontSize: 32 }}>{detail.course.icon}</span>
-                  <div>
+                  <div style={{ flex: 1 }}>
                     <h3 style={{ margin: 0 }}>{detail.course.title}</h3>
-                    <div className="muted" style={{ fontSize: 13 }}>{detail.course.level_name} · {detail.chapters?.length ?? 0} chapters</div>
+                    <div className="muted" style={{ fontSize: 13 }}>{detail.chapters?.length ?? 0} chapters</div>
+                  </div>
+                  <div className="field" style={{ margin: 0, minWidth: 220 }}>
+                    <label style={{ fontSize: 11 }}>Learning level</label>
+                    <select value={detail.course.level_id ?? ''} disabled={busy}
+                      onChange={(e) => changeDetailLevel(e.target.value ? Number(e.target.value) : null)}>
+                      <option value="">— Unassigned —</option>
+                      {levels.map((lv: any) => <option key={lv.id} value={lv.id}>{lv.name}</option>)}
+                    </select>
                   </div>
                 </div>
               </div>
@@ -255,6 +376,41 @@ export default function CourseRepository() {
         </section>
       </div>
 
+      {addPicker && selLevel !== 'all' && (
+        <div className="modal-bg" onClick={() => setAddPicker(false)}>
+          <div className="modal card pad" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 560, maxHeight: '80vh', overflow: 'auto' }}>
+            <h3 style={{ marginTop: 0 }}>Add course to {levelName}</h3>
+            <p className="muted" style={{ fontSize: 13, marginTop: 0 }}>Pick an existing repository course from another level or unassigned.</p>
+            <input placeholder="Search courses…" value={pickerQ} onChange={(e) => setPickerQ(e.target.value)} style={{ width: '100%', marginBottom: 12 }} />
+            <div className="grid" style={{ gap: 8 }}>
+              {pickerFiltered.map((c) => (
+                <div key={c.id} className="row between repo-picker-row" style={{ gap: 10, padding: '10px 12px', border: '1px solid var(--border)', borderRadius: 8 }}>
+                  <div style={{ minWidth: 0 }}>
+                    <b style={{ fontSize: 14 }}>{c.icon} {c.title}</b>
+                    <div className="muted" style={{ fontSize: 12 }}>{c.level_name || 'Unassigned'} · {c.chapter_count} ch</div>
+                  </div>
+                  <button type="button" className="btn sm" disabled={busy}
+                    onClick={async () => {
+                      setBusy(true);
+                      try {
+                        await setCourseLevel(c.id, selLevel);
+                        flash(`"${c.title}" added to level.`);
+                        setAddPicker(false);
+                        loadCourses(); loadOverview();
+                      } catch (e: any) { alert(e?.message || 'Failed'); }
+                      finally { setBusy(false); }
+                    }}>Add</button>
+                </div>
+              ))}
+              {pickerFiltered.length === 0 && (
+                <div className="muted" style={{ padding: 16, textAlign: 'center' }}>No other courses available to add.</div>
+              )}
+            </div>
+            <button type="button" className="btn ghost" style={{ marginTop: 14 }} onClick={() => setAddPicker(false)}>Close</button>
+          </div>
+        </div>
+      )}
+
       {editCourse && (
         <div className="modal-bg" onClick={() => setEditCourse(null)}>
           <div className="modal card pad" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 520 }}>
@@ -262,7 +418,7 @@ export default function CourseRepository() {
             <div className="grid" style={{ gap: 10 }}>
               <div className="field"><label>Learning level</label>
                 <select value={editCourse.level_id ?? ''} onChange={(e) => setEditCourse({ ...editCourse, level_id: Number(e.target.value) || null })}>
-                  <option value="">— Select level —</option>
+                  <option value="">— Unassigned —</option>
                   {levels.map((lv: any) => <option key={lv.id} value={lv.id}>{lv.name}</option>)}
                 </select>
               </div>

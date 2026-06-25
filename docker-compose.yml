@@ -41,6 +41,8 @@ services:
       SMTP_USER: ${SMTP_USER:-}
       SMTP_PASS: ${SMTP_PASS:-}
       SMTP_FROM: ${SMTP_FROM:-}
+      SITE_HOSTNAME: ${SITE_HOSTNAME:-robotinkerpreneur.com}
+      SITE_URL: ${SITE_URL:-https://robotinkerpreneur.com}
     # Make host.containers.internal resolve to the host gateway
     extra_hosts:
       - "host.containers.internal:host-gateway"

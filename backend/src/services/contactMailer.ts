@@ -33,8 +33,9 @@ export async function sendContactForwardEmail(
 
   const subject = `New enquiry: ${payload.topic} — ${payload.name}`;
 
+  const siteHost = config.site.hostname;
   const text = [
-    'New contact form submission from robotinkerpreneur.com',
+    `New contact form submission from ${siteHost}`,
     '',
     `Name:    ${payload.name}`,
     `Email:   ${payload.email}`,
@@ -58,7 +59,7 @@ export async function sendContactForwardEmail(
     <h3 style="color:#1d2a3a;margin-top:16px">Message</h3>
     <p style="font-family:Arial,sans-serif;font-size:14px;line-height:1.6;white-space:pre-wrap">${esc(payload.message)}</p>
     <hr style="border:none;border-top:1px solid #e3e8ef;margin-top:24px"/>
-    <p style="color:#999;font-size:12px">Sent from robotinkerpreneur.com · Nervescape Analytics</p>
+    <p style="color:#999;font-size:12px">Sent from ${siteHost} · Nervescape Analytics</p>
   `;
 
   try {

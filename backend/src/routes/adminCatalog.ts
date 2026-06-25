@@ -130,6 +130,18 @@ router.post('/courses', asyncH(async (req, res) => {
   res.status(201).json({ course: row });
 }));
 
+const levelAssignSchema = z.object({ level_id: z.number().int().nullable() });
+router.patch('/courses/:id/level', asyncH(async (req, res) => {
+  const id = Number(req.params.id);
+  const { level_id } = levelAssignSchema.parse(req.body);
+  const row = await one<any>(
+    `UPDATE course_catalog SET level_id=$1, updated_by=$2 WHERE id=$3 RETURNING *`,
+    [level_id, req.user!.id, id]
+  );
+  if (!row) throw httpError(404, 'Course not found');
+  res.json({ course: row });
+}));
+
 router.put('/courses/:id', asyncH(async (req, res) => {
   const id = Number(req.params.id);
   const d = catalogSchema.partial().parse(req.body);

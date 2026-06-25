@@ -4,6 +4,8 @@ This stack exposes the LMS through **Cloudflare Tunnel** (`cloudflared`) in Dock
 
 **Production hostname:** `robotinkerpreneur.com` — see **[ROBOTINKERPRENEUR-FIX.md](ROBOTINKERPRENEUR-FIX.md)** if the site still shows GoDaddy Website Builder.
 
+> **Spelling:** The correct domain is **robotinkerpreneur.com** (`tinker` + `preneur`). A common typo is `robotinkorpreneur.com` — that hostname is not configured and will not resolve to this app.
+
 Local-only access (no tunnel): `http://localhost:${WEB_PORT}` (default **8080**).
 
 ---

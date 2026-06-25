@@ -40,4 +40,6 @@ export const apiPost = <T = any>(p: string, body?: any) =>
   api<T>(p, { method: 'POST', body: body ? JSON.stringify(body) : undefined });
 export const apiPut = <T = any>(p: string, body?: any) =>
   api<T>(p, { method: 'PUT', body: body ? JSON.stringify(body) : undefined });
+export const apiPatch = <T = any>(p: string, body?: any) =>
+  api<T>(p, { method: 'PATCH', body: body ? JSON.stringify(body) : undefined });
 export const apiDel = <T = any>(p: string) => api<T>(p, { method: 'DELETE' });

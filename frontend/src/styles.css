@@ -1120,8 +1120,20 @@ tbody tr:hover { background: var(--card-2); }
 .repo-level-btn.active { background: rgba(99,102,241,.12); border-color: var(--primary, #6366f1); font-weight: 600; }
 .repo-count { font-size: 11px; padding: 2px 8px; border-radius: 99px; background: var(--border); margin-left: auto; }
 .repo-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 12px; }
-.repo-course-card { cursor: pointer; text-align: left; transition: transform .12s, box-shadow .12s; border: 1px solid var(--border); width: 100%; }
+.repo-course-card { transition: transform .12s, box-shadow .12s; border: 1px solid var(--border); width: 100%; padding: 0; overflow: hidden; }
+.repo-course-card.selected { border-color: var(--primary, #6366f1); box-shadow: 0 0 0 2px rgba(99,102,241,.15); }
 .repo-course-card:hover { transform: translateY(-2px); box-shadow: 0 8px 24px rgba(0,0,0,.08); }
+.repo-card-actions { display: flex; align-items: stretch; gap: 0; }
+.repo-card-check { margin: 12px 0 12px 12px; flex-shrink: 0; align-self: flex-start; }
+.repo-card-body { flex: 1; cursor: pointer; text-align: left; border: none; background: transparent; padding: 12px; min-width: 0; }
+.repo-card-icon { font-size: 28px; width: 44px; height: 44px; border-radius: 10px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+.repo-card-remove {
+  flex-shrink: 0; width: 36px; border: none; border-left: 1px solid var(--border); background: transparent;
+  color: var(--muted); font-size: 18px; cursor: pointer; transition: background .12s, color .12s;
+}
+.repo-card-remove:hover:not(:disabled) { background: #fef2f2; color: #dc2626; }
+.repo-empty { padding: 24px; text-align: center; }
+.repo-picker-row { align-items: center; }
 .repo-detail-cols { display: grid; gap: 14px; }
 .repo-class-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 8px; }
 .repo-class-chip {

@@ -40,8 +40,9 @@ router.post('/chat', asyncH(async (req, res) => {
   const message = String(req.body?.message || '').trim().slice(0, 1000);
   if (!message) { res.status(400).json({ error: 'message is required' }); return; }
 
+  const { hostname, url: siteUrl } = config.site;
   const systemPrompt =
-    `You are "Nerve", the helpful and professional AI assistant on the RoboTinkerPreneur website (robotinkerpreneur.com) — ` +
+    `You are "Nerve", the helpful and professional AI assistant on the RoboTinkerPreneur website (${hostname}) — ` +
     `an ATL Robotics, AI & STEM learning platform for school students in Classes 6–12, operated by Nervescape Analytics. ` +
     `\n\nWhat you know about the platform:\n` +
     `- Programs offered: Robotics, Basic Electronics & Breadboarding, Arduino & Microcontrollers, IoT & AIoT, ` +
@@ -55,7 +56,7 @@ router.post('/chat', asyncH(async (req, res) => {
     `1. Answer ONLY from the information above. Do NOT invent pricing, dates, or features not listed.\n` +
     `2. If a question is outside your knowledge, say so honestly and politely.\n` +
     `3. For anything requiring a callback or sales discussion, politely ask the visitor to share their name and phone number ` +
-    `OR fill the Contact form at robotinkerpreneur.com/contact OR email support@nervescape.com.\n` +
+    `OR fill the Contact form at ${siteUrl}/contact OR email support@nervescape.com.\n` +
     `4. Be warm, concise, and professional. Never be dismissive.\n` +
     `5. Do not share internal passwords, DB details, or system internals.`;
 
